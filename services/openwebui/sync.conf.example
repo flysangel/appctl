@@ -1,0 +1,6 @@
+# openwebui admin 種子設定（cp sync.conf.example sync.conf 後填；sync.conf gitignored）。admin 密碼 ADMIN_PASSWORD 見 sync.secret.env。
+OPENWEBUI_URL=http://127.0.0.1:8080
+ADMIN_EMAIL=admin@example.com
+ADMIN_NAME=admin
+# 語音功能（語音輸入、朗讀、通話）。實驗室不提供語音，填 false；正式環境提供語音時改 true
+VOICE_ENABLED=false

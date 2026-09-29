@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xadm-lxqt
+  labels:
+    app: xadm-lxqt
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: xadm-lxqt
+  template:
+    metadata:
+      labels:
+        app: xadm-lxqt
+    spec:
+      containers:
+      - name: xadm-lxqt
+        image: xadm-lxqt
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3389
+          protocol: TCP
+        - containerPort: 22
+          protocol: TCP
+        volumeMounts:
+        - name: wk
+          mountPath: /home/bigred/wk
+        - name: dshm
+          mountPath: /dev/shm
+        securityContext:
+          privileged: true
+      volumes:
+      - name: wk
+        persistentVolumeClaim:
+          claimName: xadm-lxqt-wk
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 2Gi
+      serviceAccountName: xadm-lxqt

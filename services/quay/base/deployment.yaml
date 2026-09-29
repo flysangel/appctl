@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quay
+  labels:
+    app: quay
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quay
+  template:
+    metadata:
+      labels:
+        app: quay
+    spec:
+      containers:
+      - name: quay-app
+        image: quay-quay-app
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        volumeMounts:
+        - name: quay-conf
+          mountPath: /conf/stack
+        - name: quay-data
+          mountPath: /datastorage
+      - name: postgresql
+        image: quay-postgresql
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: POSTGRES_USER
+          value: quayuser
+        - name: POSTGRES_DB
+          value: quay
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: quay
+              key: DB_PASSWORD
+        volumeMounts:
+        - name: pg-init
+          mountPath: /docker-entrypoint-initdb.d
+        - name: pg-data
+          mountPath: /var/lib/postgresql/data
+      - name: redis
+        image: quay-redis
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: quay
+              key: REDIS_PASSWORD
+      volumes:
+      - name: pg-data
+        persistentVolumeClaim:
+          claimName: quay-pg-data
+      - name: quay-data
+        persistentVolumeClaim:
+          claimName: quay-quay-data
+      - name: pg-init
+        configMap:
+          name: quay-pg-init
+      - name: quay-conf
+        secret:
+          secretName: quay-conf

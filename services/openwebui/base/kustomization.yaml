@@ -1,0 +1,11 @@
+# openwebui（網頁聊天前端，後端走 litellm；自帶 PostgreSQL 加 pgvector 當主資料庫與向量庫）工作負載正本，兩軌共用。
+# image 完整字面值見下方 images:；多容器服務，短名照「<svc>-<容器名>」，帶服務名才不會落到 Docker Hub 的同名官方映像。
+resources:
+  - deployment.yaml
+images:
+  - name: openwebui-webui
+    newName: ghcr.io/open-webui/open-webui
+    newTag: "v0.11.0"
+  - name: openwebui-db
+    newName: quay.io/flysangel/pgvector/pgvector
+    newTag: "0.8.6-pg17"

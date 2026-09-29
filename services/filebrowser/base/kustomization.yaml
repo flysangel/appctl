@@ -1,0 +1,8 @@
+# filebrowser（網頁檔案總管）工作負載正本，podman 與 k8s 兩軌共用。
+# image 完整字面值見下方 images:，manifest 內只寫短名。
+resources:
+  - deployment.yaml
+images:
+  - name: filebrowser
+    newName: quay.io/flysangel/fbs
+    newTag: "base-v1.0.3"

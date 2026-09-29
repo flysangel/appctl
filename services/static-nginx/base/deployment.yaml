@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-nginx
+  labels:
+    app: static-nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: static-nginx
+  template:
+    metadata:
+      labels:
+        app: static-nginx
+    spec:
+      containers:
+      - name: nginx
+        image: static-nginx
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+          protocol: TCP
+        volumeMounts:
+        - name: data
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: static-nginx-data

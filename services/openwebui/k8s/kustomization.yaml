@@ -1,0 +1,9 @@
+# openwebui k8s 軌 overlay：共用 base ＋ 叢集專屬資源（Service／Ingress／PVC）。
+# Ingress host／PVC 容量此環境固定不變，正本直接寫死。
+namespace: default
+resources:
+  - ../secret
+  - ../base
+  - service.yaml
+  - ingress.yaml
+  - pvc.yaml

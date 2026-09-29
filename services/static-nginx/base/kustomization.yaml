@@ -1,0 +1,10 @@
+# static-nginx（靜態網站伺服器）工作負載正本，兩軌共用。
+# image 完整字面值見下方 images:，manifest 內只寫短名。
+# 短名取服務名 static-nginx 而非容器名 nginx——Docker Hub 官方庫真的有一個叫 nginx 的映像，
+# 用裸容器名當短名時 images: 一旦漏列就會拉到能正常啟動的錯映像（K2）。
+resources:
+  - deployment.yaml
+images:
+  - name: static-nginx
+    newName: quay.io/flysangel/library/nginx
+    newTag: "1.31.3"

@@ -1,0 +1,19 @@
+# static-nginx podman 軌 overlay：共用 base ＋ 本軌專屬的 hostPort。
+# namespace 對 podman kube play 無作用，保留是為了與 k8s 軌產物一致。
+namespace: default
+resources:
+  - ../base
+patches:
+  # 用 JSON6902 而非 strategic merge：後者對 ports 的合併鍵是 (containerPort, protocol)，
+  # 漏寫 protocol 會靜默不套用、hostPort 憑空消失且產物看起來正常。
+  # op: test 是護欄——6902 靠索引定位，base 重排容器時索引會指到別的容器。
+  - target:
+      kind: Deployment
+      name: static-nginx
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/0/name
+        value: nginx
+      - op: add
+        path: /spec/template/spec/containers/0/ports/0/hostPort
+        value: 80

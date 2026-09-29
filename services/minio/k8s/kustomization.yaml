@@ -1,0 +1,11 @@
+# minio k8s 軌 overlay：共用 base ＋ headless Service。
+# podman 單節點 Pod／k8s 分散式 StatefulSet，兩軌拓樸不同，見 ../base 的說明。
+# 機密（root 帳密）由 ../secret 的 secretGenerator 產生（Secret minio）。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: default
+resources:
+- ../secret
+- ../base
+- service.yaml

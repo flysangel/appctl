@@ -1,0 +1,14 @@
+# vllm（地端推論服務，OpenAI 相容 API：chat 8000、embed 8001、rerank 8002）工作負載正本；三個容器同一顆映像，短名照「<svc>-<容器名>」。
+# 權重由同服務的 sync.sh 預先下載進具名卷 vllm-models，容器帶 HF_HUB_OFFLINE 啟動，不連外下載。
+resources:
+  - deployment.yaml
+images:
+  - name: vllm-chat
+    newName: quay.io/flysangel/vllm/vllm-openai
+    newTag: "v0.29.0"
+  - name: vllm-embed
+    newName: quay.io/flysangel/vllm/vllm-openai
+    newTag: "v0.29.0"
+  - name: vllm-rerank
+    newName: quay.io/flysangel/vllm/vllm-openai
+    newTag: "v0.29.0"

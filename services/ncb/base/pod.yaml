@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ncb
+  labels:
+    app: ncb
+spec:
+  restartPolicy: Always
+  containers:
+  - name: nginx
+    image: ncb-nginx
+    imagePullPolicy: IfNotPresent
+    command:
+    - /bin/sh
+    - -c
+    - while :; do sleep 168h; nginx -s reload; done & nginx -g 'daemon off;'
+    ports:
+    - containerPort: 80
+      protocol: TCP
+      hostPort: 80
+    - containerPort: 443
+      protocol: TCP
+      hostPort: 443
+    volumeMounts:
+    - name: ncb-conf
+      mountPath: /etc/nginx/conf.d
+    - name: certbot
+      mountPath: /etc/letsencrypt
+  - name: certbot
+    image: ncb-certbot
+    imagePullPolicy: IfNotPresent
+    command:
+    - /bin/sh
+    - -c
+    - while :; do certbot renew; sleep 12h; done
+    volumeMounts:
+    - name: certbot
+      mountPath: /etc/letsencrypt
+  volumes:
+  - name: ncb-conf
+    configMap:
+      name: ncb-ncb-conf
+  - name: certbot
+    persistentVolumeClaim:
+      claimName: ncb-certbot

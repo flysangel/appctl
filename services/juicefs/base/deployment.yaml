@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: juicefs
+  labels:
+    app: juicefs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: juicefs
+  template:
+    metadata:
+      labels:
+        app: juicefs
+    spec:
+      containers:
+      - name: minio
+        image: juicefs-minio
+        imagePullPolicy: IfNotPresent
+        args:
+        - server
+        - /data
+        - --console-address
+        - :9001
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: juicefs
+              key: MINIO_ROOT_USER
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: juicefs
+              key: MINIO_ROOT_PASSWORD
+        volumeMounts:
+        - name: obj
+          mountPath: /data
+      # `--access-key "$MINIO_ROOT_USER"` 是裸變數，留給容器內 shell 展開；
+      # kustomize 不做字串替換，維持原樣。憑證由 ../secret 的 secretGenerator 產生（Secret juicefs）。
+      - name: juicefs
+        image: juicefs-juicefs
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -c
+        args:
+        - "until juicefs format --storage minio --bucket http://127.0.0.1:9000/jfs\
+          \ \\\n  --access-key \"$MINIO_ROOT_USER\" --secret-key \"$MINIO_ROOT_PASSWORD\"\
+          \ \\\n  sqlite3:///meta/jfs.db jfs; do echo \"wait minio backend…\"; sleep\
+          \ 2; done\nexec juicefs gateway sqlite3:///meta/jfs.db 0.0.0.0:9005\n"
+        ports:
+        - containerPort: 9005
+          protocol: TCP
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: juicefs
+              key: MINIO_ROOT_USER
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: juicefs
+              key: MINIO_ROOT_PASSWORD
+        volumeMounts:
+        - name: meta
+          mountPath: /meta
+        - name: cache
+          mountPath: /var/jfsCache
+      volumes:
+      - name: obj
+        persistentVolumeClaim:
+          claimName: juicefs-obj
+      - name: meta
+        persistentVolumeClaim:
+          claimName: juicefs-meta
+      - name: cache
+        emptyDir: {}

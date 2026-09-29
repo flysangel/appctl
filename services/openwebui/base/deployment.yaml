@@ -1,0 +1,128 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+  labels:
+    app: openwebui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwebui
+  template:
+    metadata:
+      labels:
+        app: openwebui
+    spec:
+      containers:
+      - name: webui
+        image: openwebui-webui
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        # 注意：OpenWebUI 多數設定是 PersistentConfig——這些 env 只在資料庫還沒有值時當種子，
+        # 既有實例改設定要走管理 API，不是改這裡。
+        # 後端一律走 litellm 統一出口，模型只認 litellm 的別名。
+        env:
+        - name: WEBUI_AUTH
+          value: 'True'
+        - name: ENABLE_SIGNUP
+          value: 'True'
+        - name: DEFAULT_USER_ROLE
+          value: pending
+        - name: BYPASS_MODEL_ACCESS_CONTROL
+          value: 'true'
+        - name: ENABLE_OLLAMA_API
+          value: 'False'
+        - name: ENABLE_OPENAI_API
+          value: 'True'
+        - name: OPENAI_API_BASE_URLS
+          value: http://litellm:4000/v1
+        - name: OPENAI_API_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: openwebui
+              key: OPENAI_API_KEYS
+        # 網頁聊天預設走自動分流；想明確留在地端的人可以改選 chat-local
+        - name: DEFAULT_MODELS
+          value: chat-auto
+        # 背景任務（產生標題、標籤、跟進問題）一律用地端模型，不經自動分流。
+        # 模型來自外部連線時，OpenWebUI 看的是 TASK_MODEL_EXTERNAL，不是 TASK_MODEL（v0.11.0 的 utils/task.py）
+        - name: TASK_MODEL_EXTERNAL
+          value: chat-local
+        - name: RAG_EMBEDDING_ENGINE
+          value: openai
+        - name: RAG_EMBEDDING_MODEL
+          value: embed
+        # 聊天模型選單只列白名單裡的別名；embed、rerank 只給 RAG 用，雲端別名要經自動分流，都不讓人直接選。
+        - name: OPENAI_API_CONFIGS
+          value: '{"0": {"enable": true, "model_ids": ["chat-auto", "chat-local"]}}'
+        # embedding 與 reranker 也走 litellm。embedding 位址不寫時會退回單數的 OPENAI_API_BASE_URL，不是上面那組複數設定。
+        - name: RAG_OPENAI_API_BASE_URL
+          value: http://litellm:4000/v1
+        - name: RAG_OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openwebui
+              key: OPENAI_API_KEYS
+        - name: ENABLE_RAG_HYBRID_SEARCH
+          value: "true"
+        - name: RAG_RERANKING_ENGINE
+          value: external
+        - name: RAG_RERANKING_MODEL
+          value: rerank
+        - name: RAG_EXTERNAL_RERANKER_URL
+          value: http://litellm:4000/v1/rerank
+        - name: RAG_EXTERNAL_RERANKER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openwebui
+              key: OPENAI_API_KEYS
+        # 主資料庫與向量庫都用同 pod 的 db 容器（PostgreSQL 加 pgvector），pod 內以 127.0.0.1 互連。
+        # PGVECTOR_DB_URL 不設時沿用 DATABASE_URL。
+        - name: VECTOR_DB
+          value: pgvector
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: openwebui
+              key: DATABASE_URL
+        # 把登入者的 email 等身分轉送給 litellm 歸戶（X-OpenWebUI-User-*）。
+        # ENABLE_FORWARD_USER_INFO_HEADERS 在 v0.11.0 讀自 env.py，不是 PersistentConfig，改了重啟就生效
+        - name: ENABLE_FORWARD_USER_INFO_HEADERS
+          value: "true"
+        # 連線池的 DNS 快取秒數，預設 300。podman 軌重新部署 litellm 時 pod 位址會變，
+        # 快取太久會讓 OpenWebUI 連舊位址好幾分鐘（v0.11.0 的 utils/session_pool.py，2026-09-18 實測）
+        - name: AIOHTTP_POOL_DNS_TTL
+          value: "10"
+        volumeMounts:
+        - name: data
+          mountPath: /app/backend/data
+      - name: db
+        image: openwebui-db
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: POSTGRES_USER
+          value: openwebui
+        - name: POSTGRES_DB
+          value: openwebui
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: openwebui
+              key: POSTGRES_PASSWORD
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: TZ
+          value: Asia/Taipei
+        volumeMounts:
+        - name: db
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: openwebui-data
+      - name: db
+        persistentVolumeClaim:
+          claimName: openwebui-db

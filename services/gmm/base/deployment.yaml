@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gmm
+  labels:
+    app: gmm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gmm
+  template:
+    metadata:
+      labels:
+        app: gmm
+    spec:
+      containers:
+      - name: guacamole
+        image: gmm-guacamole
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        env:
+        - name: GUACD_HOSTNAME
+          value: 127.0.0.1
+        - name: MYSQL_HOSTNAME
+          value: 127.0.0.1
+        - name: MYSQL_DATABASE
+          value: guacamole
+        - name: MYSQL_USER
+          value: guacamole
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: gmm
+              key: MYSQL_PASSWORD
+        - name: TZ
+          value: Asia/Taipei
+        - name: ALLOWED_LANGUAGES
+          value: en
+        - name: REMOTE_IP_VALVE_ENABLED
+          value: 'true'
+        - name: RECORDING_ENABLED
+          value: 'true'
+        - name: BAN_ENABLED
+          value: 'true'
+        - name: TOTP_ENABLED
+          value: 'false'
+        - name: LOGO
+          value: prometheus
+        volumeMounts:
+        - name: recordings
+          mountPath: /var/lib/guacamole/recordings
+      - name: guacd
+        image: gmm-guacd
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GUACD_LOG_LEVEL
+          value: debug
+        volumeMounts:
+        - name: recordings
+          mountPath: /var/lib/guacamole/recordings
+      - name: mariadb
+        image: gmm-mariadb
+        imagePullPolicy: IfNotPresent
+        args:
+        - --character-set-server=utf8mb4
+        - --collation-server=utf8mb4_general_ci
+        env:
+        - name: MARIADB_DATABASE
+          value: guacamole
+        - name: MARIADB_USER
+          value: guacamole
+        - name: TZ
+          value: Asia/Taipei
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: gmm
+              key: MARIADB_ROOT_PASSWORD
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: gmm
+              key: MYSQL_PASSWORD
+        volumeMounts:
+        - name: db
+          mountPath: /var/lib/mysql
+      volumes:
+      # recordings 由 guacamole 與 guacd 共掛（錄影檔共享），mariadb 資料另掛 gmm-db。
+      # podman 軌由 kube play 把 PVC 轉為具名卷（名稱＝claimName）。
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: gmm-recordings
+      - name: db
+        persistentVolumeClaim:
+          claimName: gmm-db

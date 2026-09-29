@@ -1,0 +1,21 @@
+# quay（容器映像 registry：quay-app＋postgresql＋redis）工作負載正本，兩軌共用。
+# image 完整字面值見下方 images:，manifest 內只寫短名。
+# initdb.sql 兩軌內容相同，連同 configMapGenerator 一併收在此處；生成的 ConfigMap
+# 名為 quay-pg-init，manifest 以字面名引用（disableNameSuffixHash 讓名稱穩定）。
+# 機密（DB 密碼與 config.yaml）由各軌 overlay 的 ../secret 產生。
+resources:
+  - deployment.yaml
+generatorOptions: { disableNameSuffixHash: true }
+configMapGenerator:
+- name: quay-pg-init
+  files: [initdb.sql]
+images:
+  - name: quay-quay-app
+    newName: quay.io/flysangel/quay/quay-rhel8
+    newTag: "v3.15.6"
+  - name: quay-postgresql
+    newName: quay.io/flysangel/library/postgres
+    newTag: "13.23"
+  - name: quay-redis
+    newName: quay.io/flysangel/rhel8/redis-6
+    newTag: "1-1785388756"

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: xadm-xfce
+  labels:
+    app: xadm-xfce
+spec:
+  selector:
+    app: xadm-xfce
+  ports:
+  - port: 33890
+    targetPort: 3389
+    protocol: TCP
+    name: p33890
+  - port: 22100
+    targetPort: 22
+    protocol: TCP
+    name: p22100
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false

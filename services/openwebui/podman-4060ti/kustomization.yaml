@@ -1,0 +1,40 @@
+# openwebui podman-4060ti 軌 overlay（實驗室）：共用 base ＋ 本軌專屬的 hostPort 與 litellm 位址。
+# namespace 對 podman kube play 無作用，保留是為了與 k8s 軌產物一致。
+namespace: default
+resources:
+  - ../secret
+  - ../base
+patches:
+  # 用 JSON6902 而非 strategic merge：後者對 ports 的合併鍵是 (containerPort, protocol)，
+  # 漏寫 protocol 會靜默不套用、hostPort 憑空消失且產物看起來正常。
+  # op: test 是護欄——6902 靠索引定位，base 重排容器時索引會指到別的容器。
+  - target:
+      kind: Deployment
+      name: openwebui
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/0/name
+        value: webui
+      # 不設 hostIP：實驗室網段的其他主機要連得到，hostPort 綁所有介面。
+      - op: add
+        path: /spec/template/spec/containers/0/ports/0/hostPort
+        value: 8080
+      # podman 的跨 pod 名稱是「Deployment 名加 -pod」，K8s 的 Service 名 litellm 在這裡解析不到（podman 5.7.0 實測）。
+      - op: test
+        path: /spec/template/spec/containers/0/env/6/name
+        value: OPENAI_API_BASE_URLS
+      - op: replace
+        path: /spec/template/spec/containers/0/env/6/value
+        value: http://litellm-pod:4000/v1
+      - op: test
+        path: /spec/template/spec/containers/0/env/13/name
+        value: RAG_OPENAI_API_BASE_URL
+      - op: replace
+        path: /spec/template/spec/containers/0/env/13/value
+        value: http://litellm-pod:4000/v1
+      - op: test
+        path: /spec/template/spec/containers/0/env/18/name
+        value: RAG_EXTERNAL_RERANKER_URL
+      - op: replace
+        path: /spec/template/spec/containers/0/env/18/value
+        value: http://litellm-pod:4000/v1/rerank

@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  labels:
+    app: litellm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      containers:
+      - name: proxy
+        image: litellm-proxy
+        imagePullPolicy: IfNotPresent
+        args:
+        - --config
+        - /etc/litellm/config.yaml
+        - --port
+        - '4000'
+        ports:
+        - containerPort: 4000
+          protocol: TCP
+        env:
+        - name: LITELLM_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm
+              key: LITELLM_MASTER_KEY
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: litellm
+              key: DATABASE_URL
+        - name: TZ
+          value: Asia/Taipei
+        # 請求紀錄裡每個字串的截斷上限，預設 2048 字元；調大才能完整保存長 prompt 與回應
+        - name: MAX_STRING_LENGTH_PROMPT_IN_DB
+          value: "1000000"
+        # 雲端來源的金鑰。三個都設 optional：還沒申請的那個缺席也能啟動，只是那個來源用不了
+        - name: CLOUDFLARE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm
+              key: CLOUDFLARE_API_KEY
+              optional: true
+        - name: CLOUDFLARE_ACCOUNT_ID
+          valueFrom:
+            secretKeyRef:
+              name: litellm
+              key: CLOUDFLARE_ACCOUNT_ID
+              optional: true
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: litellm
+              key: GROQ_API_KEY
+              optional: true
+        # 只跑 1 個 worker 與 1 個副本，用不到 Redis，關掉 /ui 的 Redis 提示
+        # 加 worker 或副本時，拿掉這個環境變數並上 Redis，完整步驟見 AGENTS.md 地雷區第 17 條
+        - name: LITELLM_DISABLE_NO_REDIS_WARNING
+          value: "true"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/litellm
+      - name: postgres
+        image: litellm-postgres
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: POSTGRES_USER
+          value: litellm
+        - name: POSTGRES_DB
+          value: litellm
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: litellm
+              key: POSTGRES_PASSWORD
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: TZ
+          value: Asia/Taipei
+        volumeMounts:
+        - name: db
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: config
+        configMap:
+          name: litellm-config
+      - name: db
+        persistentVolumeClaim:
+          claimName: litellm-db

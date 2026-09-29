@@ -1,0 +1,11 @@
+# minio（S3 物件儲存）k8s 軌工作負載正本。
+# 本服務兩軌拓樸不同且無法共用：podman kube play 不支援 StatefulSet
+# （實測 exit 125），故 podman 軌保留自己的 pod.yaml 與 images:，不引用本目錄。
+# image 以 digest 釘選，故用 digest: 欄而非 newTag:——兩者同時給會產出
+# repo:TAG@sha256:...，tag 淪為假資訊。
+resources:
+  - statefulset.yaml
+images:
+- name: minio
+  newName: quay.io/flysangel/minio/minio
+  digest: sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2

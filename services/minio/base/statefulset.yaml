@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  labels:
+    app: minio
+spec:
+  serviceName: minio
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+      - name: minio
+        image: minio
+        imagePullPolicy: IfNotPresent
+        args:
+        - server
+        - http://minio-{0...1}.minio/data{0...1}
+        - --console-address
+        - :9001
+        ports:
+        - containerPort: 9000
+          protocol: TCP
+        - containerPort: 9001
+          protocol: TCP
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: minio
+              key: MINIO_ROOT_USER
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minio
+              key: MINIO_ROOT_PASSWORD
+        volumeMounts:
+        - name: minio-data0
+          mountPath: /data0
+        - name: minio-data1
+          mountPath: /data1
+  volumeClaimTemplates:
+  - metadata:
+      name: minio-data0
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+  - metadata:
+      name: minio-data1
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi

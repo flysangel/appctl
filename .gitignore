@@ -1,0 +1,54 @@
+# 機密：永不追蹤（執行期由 K8s Secret/SOPS 或本機 .env 注入）
+.env
+*.env
+!.env.example
+!*.env.example
+*.key
+*.pem
+id_rsa*
+**/secrets/
+
+# build / render 產出
+build/
+
+# 服務營運機密（sync 工具）
+sync.conf
+mapping.list
+random.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# 機密檔卷真值（quay config.yaml 等）；範本 .example 仍入庫。
+# 需先解除第 9 行 **/secrets/ 的目錄級排除（否則 git 不下降、下方放行無效），再排除內容、再放行 example。
+!services/*/secrets/
+services/*/secrets/**
+!services/*/secrets/**/
+!services/*/secrets/**/*.example
+
+# 單數 secret/：機密真值檔 deny-by-default，只放行範本與 kustomize 宣告。
+# 複數 secrets/ 的規則（上方）留給遷移期，遷移完成後可一併清掉。
+# quay 的 config.yaml 不是 .env，不受第 3 行 *.env 保護，沒有這段會被 git 追蹤到明文密碼。
+!services/*/secret/
+services/*/secret/**
+!services/*/secret/**/
+!services/*/secret/*.example
+!services/*/secret/kustomization.yaml
+
+# SDD 工作區：計畫執行期的 ledger 與 review 產物，非交付物
+.superpowers/
+
+# spec、plan、工單：本機暫存，不進版控，見根 repo CLAUDE.md〈路由表〉
+/docs/superpowers/
+/docs/tickets/
+
+# worktree：本 repo 的 worktree 慣例開在 .worktrees/
+/.worktrees/
+
+# finetune 服務已移出版控：檔案只留在本機
+/services/finetune/
+/services/vllm/finetuned-4060ti/
+/tests/test_build_dataset.py
+/tests/test_slides_extract.py
+/tests/test_split_corpus.py

@@ -1,0 +1,11 @@
+# kadm k8s 軌 overlay：共用 base ＋ 叢集專屬資源（PVC／ServiceAccount／ClusterRoleBinding／Service）。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: default
+resources:
+- pvc.yaml
+- serviceaccount.yaml
+- clusterrolebinding.yaml
+- ../base
+- service.yaml

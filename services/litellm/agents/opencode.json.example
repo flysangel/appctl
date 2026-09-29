@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": ["litellm"],
+  "model": "litellm/chat-local",
+  "small_model": "litellm/chat-local",
+  "share": "disabled",
+  "autoupdate": false,
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM",
+      "options": {
+        "baseURL": "http://127.0.0.1:4000/v1",
+        "apiKey": "{env:LITELLM_API_KEY}"
+      },
+      "models": {
+        "chat-local": {
+          "name": "chat-local（地端，資料不出公司）",
+          "tool_call": true,
+          "limit": { "context": 32768, "output": 8192 }
+        },
+        "chat-cloud": {
+          "name": "chat-cloud（雲端，會送到外部服務）",
+          "tool_call": true,
+          "limit": { "context": 128000, "output": 8192 }
+        }
+      }
+    }
+  }
+}

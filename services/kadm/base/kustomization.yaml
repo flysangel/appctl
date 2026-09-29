@@ -1,0 +1,9 @@
+# kadm（k8s 管理 SSH 堡壘＋pod 內 podman；cluster-admin）工作負載正本。
+# 只有 k8s 軌，沒有 podman 軌。
+# image 完整字面值見下方 images:，manifest 內只寫短名。
+resources:
+  - deployment.yaml
+images:
+- name: kadm
+  newName: quay.io/flysangel/alpine
+  newTag: "k8sadm-v1.0.3"

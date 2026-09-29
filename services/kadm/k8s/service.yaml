@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kadm
+  labels:
+    app: kadm
+spec:
+  selector:
+    app: kadm
+  ports:
+  - port: 22100
+    targetPort: 22
+    protocol: TCP
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false

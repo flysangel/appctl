@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kadm
+  labels:
+    app: kadm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kadm
+  template:
+    metadata:
+      labels:
+        app: kadm
+    spec:
+      containers:
+      - name: kadm
+        image: kadm
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 22
+          protocol: TCP
+        volumeMounts:
+        - name: wk
+          mountPath: /home/bigred/wk
+        securityContext:
+          privileged: true
+      volumes:
+      - name: wk
+        persistentVolumeClaim:
+          claimName: kadm-wk
+      serviceAccountName: kadm

@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana-grafana
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          protocol: TCP
+        env:
+        - name: GF_INSTALL_PLUGINS
+          value: grafana-clock-panel,ryantxu-ajax-panel,yesoreyeram-infinity-datasource
+        - name: GF_DATABASE_TYPE
+          value: mysql
+        - name: GF_DATABASE_HOST
+          value: 127.0.0.1:3306
+        - name: GF_DATABASE_NAME
+          value: grafana
+        - name: GF_DATABASE_USER
+          value: grafana
+        - name: GF_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana
+              key: MARIADB_PASSWORD
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/grafana
+      - name: mariadb
+        image: grafana-mariadb
+        imagePullPolicy: IfNotPresent
+        args:
+        - --character-set-server=utf8mb4
+        - --collation-server=utf8mb4_general_ci
+        env:
+        - name: MARIADB_DATABASE
+          value: grafana
+        - name: MARIADB_USER
+          value: grafana
+        - name: TZ
+          value: Asia/Taipei
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana
+              key: MARIADB_ROOT_PASSWORD
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana
+              key: MARIADB_PASSWORD
+        volumeMounts:
+        - name: db
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: grafana-data
+      - name: db
+        persistentVolumeClaim:
+          claimName: grafana-db

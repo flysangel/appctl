@@ -1,0 +1,15 @@
+# gmm（Guacamole 遠端桌面閘道三件套：guacamole＋guacd＋mariadb）工作負載正本，兩軌共用。
+# image 完整字面值見下方 images:，manifest 內只寫短名。
+# 機密（DB 密碼）由各軌 overlay 的 ../secret 產生（Secret gmm），manifest 以 secretKeyRef 引用。
+resources:
+  - deployment.yaml
+images:
+  - name: gmm-guacamole
+    newName: quay.io/flysangel/gmm
+    newTag: "guacamole-v1.0.7"
+  - name: gmm-guacd
+    newName: quay.io/flysangel/gmm
+    newTag: "guacd-v1.0.7"
+  - name: gmm-mariadb
+    newName: quay.io/flysangel/gmm
+    newTag: "mariadb-v1.0.7"

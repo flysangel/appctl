@@ -1,0 +1,3 @@
+# user|userpass|group|proto|ip|port|acct|pass|domain|alias  （恰 10 欄；空 userpass 自動產生）
+alice||LAB|rdp|192.0.2.10|3389|administrator|Passw0rd!|WORKGROUP|win
+bob||LAB|ssh|192.0.2.11|22|root|toor||box

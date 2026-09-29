@@ -1,0 +1,5 @@
+# guacamole REST-API sync 設定（cp sync.conf.example sync.conf 後填；sync.conf gitignored）。管理密碼 GUACAMOLE_PASS 見 sync.secret.env。
+GUACAMOLE_SERVER=http://127.0.0.1:8080/guacamole   # podman 軌；k8s 軌填 port-forward URL
+GUACAMOLE_ADMIN=guacadmin                          # 內建管理帳號（非 DB 密碼）
+DATA_SOURCE=mysql
+PASS_LENGTH=12

@@ -1,0 +1,12 @@
+# ncb（nginx + certbot TLS 反代前門）工作負載正本。
+# 只有 podman 軌，沒有對齊對象，故 kind 維持 Pod、hostPort 直接寫在 manifest 內。
+# image 完整字面值見下方 images:，manifest 內只寫短名。
+resources:
+  - pod.yaml
+images:
+  - name: ncb-nginx
+    newName: quay.io/flysangel/library/nginx
+    newTag: "1.31.3"
+  - name: ncb-certbot
+    newName: quay.io/flysangel/certbot/certbot
+    newTag: "v5.7.0"
