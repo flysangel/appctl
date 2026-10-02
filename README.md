@@ -2,9 +2,9 @@
 
 容器服務的部署集。內容是各服務的 kustomize manifest 正本、一支部署控制腳本（`bin/svc.sh`），以及少量營運工具。本 repo 沒有應用程式碼。
 
-每個服務都能走兩條部署路徑（track），由同一支控制腳本、同一組動詞驅動：
+每個服務都能走兩條部署軌（track，下文簡稱「軌」），由同一支控制腳本、同一組動詞驅動：
 
-| 部署路徑 | 用途 | 底層 | 拓樸 |
+| 軌 | 用途 | 底層 | 拓樸 |
 |---|---|---|---|
 | `podman` | 單機、驗證 | `podman kube play`（需 `sudo`） | 與 k8s 軌同 kind（`Deployment`、`DaemonSet`；`ncb` 是 `Pod`，`minio` 不共用）加具名卷（named volume）與 hostPort |
 | `k8s` | 正式、分散式 | `kubectl apply` | `Deployment`、`StatefulSet`、`DaemonSet` 加 PVC、Service、Ingress |
@@ -29,9 +29,9 @@
 | `xadm-lxqt` | k8s 圖形管理工作站（LXQt via xrdp） | — | ✓ | 33890→3389、22100→22 | wk 10Gi |
 | `xadm-xfce` | k8s 圖形管理工作站（XFCE4 via xrdp） | — | ✓ | 33890→3389、22100→22 | wk 10Gi |
 
-- 服務只建一個部署路徑目錄，就代表另一條路徑不支援。`ncb` 的反向代理與 TLS 在 k8s 由叢集的 Ingress 與 cert-manager 負責；`kadm`、`xadm-*` 本來就是叢集內的管理工作站；`vllm` 的 k8s 路徑還沒做。
-- 每個服務的工作負載正本在 `services/<svc>/base/`，兩條路徑的目錄只放各自的差異（podman 的 hostPort、k8s 的 Service、Ingress、PVC）。`minio` 是例外，原因見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈已知的結構性限制〉。
-- k8s 路徑的 Ingress 主機名一律是 `<svc>.local`。`juicefs`、`iperf3`、`kadm`、`xadm-*` 不出 Ingress。
+- 服務只建一個軌的目錄，就代表另一軌不支援。`ncb` 的反向代理與 TLS 在 k8s 由叢集的 Ingress 與 cert-manager 負責；`kadm`、`xadm-*` 本來就是叢集內的管理工作站；`vllm` 的 k8s 軌還沒做。
+- 每個服務的工作負載正本在 `services/<svc>/base/`，兩軌的目錄只放各自的差異（podman 的 hostPort、k8s 的 Service、Ingress、PVC）。`minio` 是例外，原因見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈已知的結構性限制〉。
+- k8s 軌的 Ingress 主機名一律是 `<svc>.local`。`juicefs`、`iperf3`、`kadm`、`xadm-*` 不出 Ingress。
 
 **`kadm`、`xadm-lxqt`、`xadm-xfce` 是最高權服務。** 三者都綁 `cluster-admin` ClusterRoleBinding、跑 `privileged` 容器、用映像內建的帳密，而且經 LoadBalancer 對外開 SSH 或 RDP。帳密不能輪換，外洩等於整座叢集淪陷，所以只能放在信任網段。
 
@@ -40,14 +40,14 @@
 | 工具 | 用途 | 必要性 |
 |---|---|---|
 | `task` | 唯一入口 | 必要 |
-| `kubectl` | 渲染（內建 kustomize）與 k8s 部署 | 必要，podman 路徑也要用它渲染 |
-| `podman` 與 `sudo` | podman 路徑部署 | 走 podman 路徑時 |
+| `kubectl` | 渲染（內建 kustomize）與 k8s 部署 | 必要，podman 軌也要用它渲染 |
+| `podman` 與 `sudo` | podman 軌部署 | 走 podman 軌時 |
 | `python3` 與 PyYAML | 單元測試、`manifest-diff` | 必要 |
 | `skopeo` | `task image:check` 查映像是否還在來源 registry | 用到時 |
-| NVIDIA 驅動、container toolkit（CDI）、podman 5.7.0 | `vllm` 的 podman 路徑掛 GPU；`nvidia-ctk cdi list` 要看得到 `nvidia.com/gpu=all`。podman 4.9.3 掛不到 GPU | 部署 `vllm` 時 |
+| NVIDIA 驅動、container toolkit（CDI）、podman 5.7.0 | `vllm` 的 podman 軌掛 GPU；`nvidia-ctk cdi list` 要看得到 `nvidia.com/gpu=all`。podman 4.9.3 掛不到 GPU | 部署 `vllm` 時 |
 | `jq`、`curl`、`nmap` | `task seed` 營運工具 | 用到時 |
 
-k8s 路徑另有兩項叢集前置：PVC 與 Ingress 刻意不指定 class，依賴叢集已經標好預設 StorageClass 與預設 IngressClass。
+k8s 軌另有兩項叢集前置：PVC 與 Ingress 刻意不指定 class，依賴叢集已經標好預設 StorageClass 與預設 IngressClass。
 
 本 repo 是工作區的子 repo。push 護欄由工作區根 repo 管理，新機器跑工作區根 repo 的 `bin/bootstrap.sh` 就會接上。
 
@@ -59,9 +59,9 @@ cp services/<svc>/secret/secret.env.example services/<svc>/secret/secret.env
 cp services/quay/secret/config.yaml.example services/quay/secret/config.yaml       # quay 另有檔案型機密
 
 # 2. 部署
-task apply SVC=<svc> TRACK=podman                    # podman 路徑
-# vllm、litellm、openwebui 的 podman 路徑依主機分軌，實驗室用 TRACK=podman-4060ti
-KUBECONFIG=<叢集設定檔> task apply SVC=<svc> TRACK=k8s   # k8s 路徑
+task apply SVC=<svc> TRACK=podman                    # podman 軌
+# vllm、litellm、openwebui 的 podman 軌依主機分軌，實驗室用 TRACK=podman-4060ti
+KUBECONFIG=<叢集設定檔> task apply SVC=<svc> TRACK=k8s   # k8s 軌
 
 # 3. 拆除（不可逆，見〈拆除與暫停〉）
 task delete SVC=<svc> TRACK=podman
@@ -72,14 +72,14 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 
 `litellm` 的模型清單是 `services/litellm/base/config.yaml`，整份進版控，不必複製。
 
-- k8s 路徑改完這個檔，要另跑 `kubectl rollout restart deployment/litellm`：ConfigMap 名稱不帶雜湊，`apply` 不會重啟 pod。
+- k8s 軌改完這個檔，要另跑 `kubectl rollout restart deployment/litellm`：ConfigMap 名稱不帶雜湊，`apply` 不會重啟 pod。
 - 雲端來源的金鑰填進 `services/litellm/secret/secret.env`，值不加引號。kustomize 會把引號當成值的一部分。
 - DLP 用 LiteLLM 內建的 guardrail，寫在 `config.yaml` 檔尾的 `guardrails`。公司自訂關鍵字改 `tw-dlp` 程式裡的 `KEYWORDS`，改完重新部署 `litellm` 才生效。
 - 直接指定雲端別名時，`tw-dlp` 阻擋含個資或圖片的請求。網頁聊天的 `chat-auto` 帶個資或圖片時，改由地端回答。
 
 ### 實驗室的連線方式
 
-`litellm`、`openwebui` 的 podman 路徑綁主機的所有介面，實驗室網段的其他主機都連得到。網頁開 `http://<主機位址>:8080`，agent 連 `http://<主機位址>:4000`，實驗室主機是 172.20.1.192。
+`litellm`、`openwebui` 的 podman 軌綁主機的所有介面，實驗室網段的其他主機都連得到。網頁開 `http://<主機位址>:8080`，agent 連 `http://<主機位址>:4000`，實驗室主機是 172.20.1.192。
 
 - 連線是 HTTP 明文，主機沒有另設防火牆。
 - OpenWebUI 開放註冊，新帳號要 admin 核准才能聊天。
@@ -123,15 +123,15 @@ task image:check SVC=<svc>   # 渲染產物的每個 image 都解析成完整參
 
 **`task delete` 不可逆。**
 
-- k8s 路徑刪掉 workload 產出的全部資源，包含 manifest 內宣告的 PVC 與機密。叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料連帶消失。
-- podman 路徑跑 `podman kube down --force`，pod 與具名卷一起移除。
+- k8s 軌刪掉 workload 產出的全部資源，包含 manifest 內宣告的 PVC 與機密。叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料連帶消失。
+- podman 軌跑 `podman kube down --force`，pod 與具名卷一起移除。
 - 兩者執行前都要求輸入服務名確認。沒有 tty（cron、CI）時 `read` 失敗，腳本中止，什麼都不刪。
 - `StatefulSet` 的 `volumeClaimTemplates` PVC 由 k8s 動態建立，不在 manifest 內，所以不隨 `delete` 移除。腳本會列出這些 PVC，並印出手動清除的指令。
 
 要暫停但保留資料時，本介面不提供 `stop`，理由見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈設計取捨〉。改用原生工具：
 
-- k8s 路徑：`kubectl scale -n <ns> --replicas=0 deployment/<name>`。`DaemonSet`（例如 `iperf3`）沒有 `replicas` 欄位，要停只能 `delete`。
-- podman 路徑：`sudo podman pod stop <svc>-pod`。`kube play` 吃 `Deployment`、`DaemonSet` 時 pod 名帶 `-pod` 後綴；`ncb` 與 `minio` 仍是 `<svc>`。
+- k8s 軌：`kubectl scale -n <ns> --replicas=0 deployment/<name>`。`DaemonSet`（例如 `iperf3`）沒有 `replicas` 欄位，要停只能 `delete`。
+- podman 軌：`sudo podman pod stop <svc>-pod`。`kube play` 吃 `Deployment`、`DaemonSet` 時 pod 名帶 `-pod` 後綴；`ncb` 與 `minio` 仍是 `<svc>`。
 - 恢復一律用 `task apply`。
 
 ### coding agent 接 LiteLLM（發個人 key）
@@ -178,5 +178,5 @@ spec、plan、工單放在 `docs/superpowers/` 與 `docs/tickets/`，只存本�
 | 方向 | 對象 | 關係 |
 |---|---|---|
 | 上游 | images | 映像推上 registry 後，版號直接寫進各服務 `base/kustomization.yaml` 的 `images:` |
-| 上游 | infra-k8s | 提供 k8s 路徑部署用的叢集 |
+| 上游 | infra-k8s | 提供 k8s 軌部署用的叢集 |
 | 護欄 | 工作區根 repo | push 護欄由工作區根 repo 管理，本 repo 沒有自己的 hook |

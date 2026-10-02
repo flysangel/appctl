@@ -22,7 +22,7 @@
 
 ### 會刪資料的動作，先問使用者
 
-- `task delete`：k8s 路徑連 manifest 內宣告的 PVC 一起刪，叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料跟著消失；podman 路徑連具名卷一起移除。
+- `task delete`：k8s 軌連 manifest 內宣告的 PVC 一起刪，叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料跟著消失；podman 軌連具名卷一起移除。
 - `task seed SVC=gmm`：刪除 `mapping.list` 以外多餘的 user、group、connection。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 是叢集最高權服務，帳密不能輪換。要部署前，先確認網段隔離。
 
@@ -40,7 +40,7 @@
 2. `services/<svc>/base/kustomization.yaml`：`resources:` 指向工作負載，加 `images:`。`name:` 寫短名，`newName:` 寫完整 repo，`newTag:` 加雙引號；digest 型改用 `digest:`（值帶 `sha256:` 前綴），而且不給 `newTag:`。
 3. 短名一律帶服務名：單容器用 `<svc>`，多容器用 `<svc>-<容器名>`。不要用裸容器名，理由見〈`images:` 對不上時不會報錯〉。
 4. `services/<svc>/{podman,k8s}/kustomization.yaml`：`namespace: default`、`resources: [../base]`，加該軌專屬的資源（podman 的 hostPort patch；k8s 的 `service.yaml`、`ingress.yaml`、`pvc.yaml`）。podman 軌的 `hostPort` 用 JSON6902 加 `op: test`，照既有服務的 overlay 抄，不用 strategic merge。
-5. 只支援一條路徑，就只建一個目錄。目錄存在就代表支援。
+5. 只支援一軌，就只建一個目錄。目錄存在就代表支援。
 6. 有機密時，建 `services/<svc>/secret/`，放 `kustomization.yaml`（`secretGenerator` 加 `generatorOptions.disableNameSuffixHash: true`）與 `secret.env.example`（佔位值，進版控）。兩軌的 `resources:` 各加一行 `../secret`。沒有機密的服務不要建這個目錄：`resources` 指向不存在的目錄，kustomize 會直接失敗。
 7. 跑〈改完要驗〉。
 
