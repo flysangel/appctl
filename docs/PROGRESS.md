@@ -4,7 +4,7 @@
 
 - minio 與 juicefs 改用 tag 釘映像：先在 images repo 替 `quay.io/flysangel/minio/minio` 同步版本 tag（mirror 現在只有 `latest`），再改用 `grep -rln 'digest: sha256:' services/` 列出的每份 `kustomization.yaml`
 - 加一道檢查，比對 quay 兩處密碼：`secret.env` 的 `DB_PASSWORD`、`REDIS_PASSWORD`，與 `config.yaml` 的 `DB_URI`、`BUILDLOGS_REDIS` 內嵌的密碼。不一致時渲染與 `apply` 都成功，quay 起得來但連不上 DB；檢查不能印出值
-- `task test` 改成每支測試檔都要印 `ALL <n> PASS`，沒印就算失敗。現在漏寫 `__main__` 的測試檔零輸出、回 0，會被當成通過
+- `task test` 改成每支測試檔都要印 `ALL <n> PASS`，沒印就算失敗。現在漏寫 `__main__` 的測試檔零輸出、回 0，`task test` 會把它當成通過
 - 安裝 `yamllint`，對全部 `kustomization.yaml` 跑一次語法檢查
 - 做 `vllm` 的 k8s 軌：拆成一個 pod 一個容器，並打通聊天
 

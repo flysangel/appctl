@@ -130,7 +130,7 @@ task litellm:check                     # 實機回歸：對執行中的 litellm 
 - `task litellm:check` 呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
 - 其他真環境煙測沒有腳本，要逐條手動跑。宣稱完成前，要真的跑過並貼出輸出。
-- 想手動驗一次 push 護欄，照工作區根 repo 的 `.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃被推的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
+- 想手動驗一次 push 護欄，照工作區根 repo 的 `.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
 
 ## 5. 不要做的事
 
