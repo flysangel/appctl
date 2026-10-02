@@ -219,7 +219,7 @@ def expect_not_cloud(result: Result) -> str | None:
 def cases(image: str) -> list[Case]:
     """D1～D12 與 R1～R7 照抄工單 01 的表，D13～D18 與 R8 是工單 03 加的探測。
 
-    工單不進版控，用 git show 059639b:docs/tickets/2026-09-19-LiteLLM-內建功能取代自寫-DLP-與分流/ 取回。
+    工單不進版控，只存本機的 docs/tickets/2026-09-19-LiteLLM-內建功能取代自寫-DLP-與分流/。
     """
     hard_with_image = [{"type": "text", "text": HARD}, {"type": "image_url", "image_url": {"url": image}}]
     block = expect_block(BLOCK_MARK)

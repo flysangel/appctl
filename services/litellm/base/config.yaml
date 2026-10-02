@@ -31,7 +31,7 @@ model_list:
         classifier_type: llm
         classifier_llm_config:
           model: chat-local       # 判斷難度的模型，由主力 LLM 兼做
-          timeout_ms: 15000
+          timeout_ms: 15000       # 預設只有 3 秒，chat-local 兼做判斷時來不及回
           classification_rubric: chat
         # 判斷逾時或出錯時留在地端：資料不出去比較安全
         classifier_fallback: default_model

@@ -62,7 +62,7 @@ spec:
               key: GROQ_API_KEY
               optional: true
         # 只跑 1 個 worker 與 1 個副本，用不到 Redis，關掉 /ui 的 Redis 提示
-        # 加 worker 或副本時，拿掉這個環境變數並上 Redis，完整步驟見 AGENTS.md 地雷區第 17 條
+        # 加 worker 或副本時，拿掉這個環境變數並上 Redis，完整步驟見 AGENTS.md〈LiteLLM 加 worker 或副本前，要先上 Redis〉
         - name: LITELLM_DISABLE_NO_REDIS_WARNING
           value: "true"
         volumeMounts:

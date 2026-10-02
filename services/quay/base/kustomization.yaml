@@ -15,6 +15,7 @@ images:
     newTag: "v3.15.6"
   - name: quay-postgresql
     newName: quay.io/flysangel/library/postgres
+    # 純數字 tag 要加雙引號，不加時 kustomize 報 cannot unmarshal number（rc=1）
     newTag: "13.23"
   - name: quay-redis
     newName: quay.io/flysangel/rhel8/redis-6

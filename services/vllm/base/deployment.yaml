@@ -38,7 +38,10 @@ spec:
         - --enable-auto-tool-choice
         - --tool-call-parser
         - qwen3_coder
-        # 兩個記憶體參數要一起帶，數字的由來見 AGENTS.md 地雷區第 14 條
+        # 兩個記憶體參數要一起帶：只帶比例時，啟動剖析會算進別的 vLLM 容器正在配置的記憶體；
+        # 只帶 KV 時，比例退回預設 0.92，另一個容器先起來就過不了啟動檢查
+        # 比例以整張卡為分母，同一張卡上的容器加總不超過 0.92；KV 數字取自只帶比例時日誌印的
+        # Current kv cache memory in use。換模型、換卡或改 context 長度時兩組都要重算
         - --gpu-memory-utilization
         - "0.56"
         - --kv-cache-memory
@@ -76,7 +79,7 @@ spec:
         - "4096"
         - --max-num-seqs
         - "4"
-        # 兩個記憶體參數要一起帶，數字的由來見 AGENTS.md 地雷區第 14 條
+        # 兩個記憶體參數要一起帶，理由見本檔第一個 vLLM 容器的註解
         - --gpu-memory-utilization
         - "0.13"
         - --kv-cache-memory
@@ -114,7 +117,7 @@ spec:
         - "4096"
         - --max-num-seqs
         - "4"
-        # 兩個記憶體參數要一起帶，數字的由來見 AGENTS.md 地雷區第 14 條
+        # 兩個記憶體參數要一起帶，理由見本檔第一個 vLLM 容器的註解
         - --gpu-memory-utilization
         - "0.13"
         - --kv-cache-memory
