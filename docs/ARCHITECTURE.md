@@ -81,7 +81,7 @@ manifest 的 `image:` 寫短名（例如 `filebrowser`、`grafana-mariadb`），
 | 檔案型機密 | `services/<svc>/secret/config.yaml`（gitignored），範本 `.example` 進版控 | `secretGenerator` 的 `files:` 直接吃真值檔；workload 用 `volumes[].secret` 掛成檔案 | 只有 quay（Secret `quay-conf`） |
 | 非機密設定檔 | 真檔直接放在正本目錄 | `configMapGenerator`；workload 用 `configMap.name` 掛載 | quay（`initdb.sql`）、ncb（`default.conf`）、litellm（`config.yaml`） |
 
-kustomize 的 load restrictor 擋裸檔案路徑，不擋目錄型 resource。`envs: [../secret.env]` 會失敗，`resources: [../secret]` 可以：被指向的目錄自成一個 kustomize root，`namespace:` 也會正確套到產生的 Secret。所以不需要 `--load-restrictor LoadRestrictionsNone`，`kubectl apply -k` 可以直接用，`delete -k` 也涵蓋 Secret。
+kustomize 的 load restrictor 擋裸檔案路徑，不擋目錄型 resource。`envs: [../secret.env]` 會失敗，`resources: [../secret]` 可以：`resources:` 指向的目錄自成一個 kustomize root，`namespace:` 也會正確套到產生的 Secret。所以不需要 `--load-restrictor LoadRestrictionsNone`，`kubectl apply -k` 可以直接用，`delete -k` 也涵蓋 Secret。
 
 litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，`KEYWORDS` 是示範值。它整份進版控，由 `configMapGenerator` 產生 ConfigMap `litellm-config`，名稱照 quay 的 `quay-pg-init` 關掉雜湊，manifest 才能寫死引用。
 
@@ -102,7 +102,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 
 卷直接寫在正本 workload 的 `volumes:`、`volumeMounts:`，標準 k8s 語法。
 
-- 共享卷：同一個 volume 被同一個 pod 的多個容器掛載，例如 gmm 的 guacamole 與 guacd 共用 `recordings`。沿用 `ReadWriteOnce`。
+- 共享卷：同一個 pod 的多個容器掛同一個 volume，例如 gmm 的 guacamole 與 guacd 共用 `recordings`。沿用 `ReadWriteOnce`。
 - 暫時卷：`emptyDir` 加 `medium: Memory` 與 `sizeLimit`，用在 `/dev/shm`（xadm-lxqt、xadm-xfce）。pod 重啟就清空。
 - PVC 容量寫死在正本的 `pvc.yaml`。
 
@@ -138,5 +138,5 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 - `minio` 兩軌不能共用 `base/`：`podman kube play` 不支援 `kind: StatefulSet`（實測 exit 125）。它的 podman 軌自帶 `pod.yaml` 與 `images:`，改版號要動兩處。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 經 LoadBalancer 對外開 SSH 或 RDP，與叢集最高權（`cluster-admin`）之間只隔一層映像內建、不能輪換的帳密。只能放在信任網段。
 - `iperf3` 的 5201 埠、`juicefs` 的 S3 9005 埠沒有額外認證，只能放在信任網段。juicefs 的 metadata 是 SQLite，只能單寫；它的 minio sidecar 是單節點。
-- 自動分流不是資安邊界。使用者可以在訊息裡左右判斷結果，資料能不能送出去只靠 DLP。
+- 自動分流不是資安邊界。使用者可以在訊息裡指定判斷結果，資料能不能送出去只靠 DLP。
 - `bin/svc.sh` 對 podman `delete` 的 exit 125 容錯還沒實際觸發過：現在 podman 軌的產物都沒有 `PersistentVolumeClaim` doc。
