@@ -1,6 +1,7 @@
 # juicefs（POSIX 檔案系統，後端 minio）工作負載正本，兩軌共用。
 # image 完整字面值見下方 images:，manifest 內只寫短名。
 # minio image 以 digest 釘選，故用 digest: 欄而非 newTag:。
+# digest: 的值要帶 sha256: 前綴，理由見 services/minio/base/kustomization.yaml。
 resources:
   - deployment.yaml
 images:

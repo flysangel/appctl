@@ -187,7 +187,7 @@ def test_delete_wrong_name_aborts():
         assert "已取消" in r.stdout, r.stdout
 
 
-# ---------- 機密檔 fallback（K10） ----------
+# ---------- 機密檔 fallback ----------
 
 def test_secret_env_created_from_example_when_missing():
     with tempfile.TemporaryDirectory() as tmp:
@@ -257,7 +257,7 @@ def test_bare_var_survives_render():
 
 
 def test_images_name_mismatch_is_silent_no_op():
-    # 記錄 K18 新守衛存在的理由：name 對不上時 kustomize rc=0 且產物留短名。
+    # 記錄 assert-images.sh 存在的理由：name 對不上時 kustomize rc=0 且產物留短名。
     bad = KUSTOMIZATION.replace("name: demo", "name: typo")
     with tempfile.TemporaryDirectory() as tmp:
         root, d, script = make_svc(tmp, kustomization=bad)
@@ -276,14 +276,14 @@ def test_secret_generator_name_has_no_hash_suffix():
 
 
 def test_missing_secret_env_breaks_render():
-    # 記錄 K10 存在的理由：沒有 fallback 時 kustomize 直接 rc≠0。
+    # 記錄機密檔 fallback 存在的理由：沒有 fallback 時 kustomize 直接 rc≠0。
     with tempfile.TemporaryDirectory() as tmp:
         root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
         r = kustomize(os.path.join(d, "k8s"))
         assert r.returncode != 0, "缺 secret.env 時 kustomize 竟然成功了"
 
 
-# ---------- assert-images.sh 新守衛（K18） ----------
+# ---------- assert-images.sh 守衛 ----------
 
 def _run_assert(root, svc):
     return subprocess.run(

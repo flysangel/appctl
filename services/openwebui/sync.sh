@@ -147,7 +147,7 @@ fi
 
 # 5）語音開關：預設使用者權限的語音輸入（stt）、朗讀（tts）、通話（call）三項照 VOICE_ENABLED 設。
 #    實驗室不提供語音：語音轉文字放進去之後，卡上沒有空間給朗讀。open-webui 內建 CPU 的 whisper 與瀏覽器朗讀，不關的話按鈕照樣出現。
-#    這組權限在 v0.11.0 是 PersistentConfig；admin 不受權限限制，仍看得到也用得了語音
+#    這組權限在 v0.11.0 是 PersistentConfig；admin 不受權限限制，仍看得到也用得了語音，所以要用一般帳號驗
 voice_keys='["stt", "tts", "call"]'
 code="$(api GET /api/v1/users/default/permissions)"
 [[ "${code}" == "200" ]] || { echo "Error: 讀不到預設使用者權限（HTTP ${code}）" >&2; exit 1; }

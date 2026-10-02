@@ -39,12 +39,12 @@ services/*/secret/**
 # SDD 工作區：計畫執行期的 ledger 與 review 產物，非交付物
 .superpowers/
 
-# spec、plan、工單：本機暫存，不進版控，見根 repo CLAUDE.md〈路由表〉
+# spec、plan、工單：只存本機，不進版控
 /docs/superpowers/
 /docs/tickets/
 
-# worktree：本 repo 的 worktree 慣例開在 .worktrees/
-/.worktrees/
+# worktree：開在 .claude/worktrees/
+/.claude/worktrees/
 
 # finetune 服務已移出版控：檔案只留在本機
 /services/finetune/

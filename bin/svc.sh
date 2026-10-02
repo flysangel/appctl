@@ -9,7 +9,7 @@ here="${root}/services/${svc}"
 [[ -d "${here}/${track}" ]] || { echo "Error: 找不到 ${here}/${track}/（服務名錯誤，或 ${svc} 無 ${track} 軌）" >&2; exit 1; }
 
 # 機密檔缺席時以 .example 佔位值補上——沒有它 kustomize build 直接失敗，
-# 連 delete 與純本地語法驗證都跑不動（K10）。
+# 連 delete 與純本地語法驗證都跑不動。
 for base in secret.env config.yaml; do
   ex="${here}/secret/${base}.example"
   [[ -f "${ex}" && ! -f "${here}/secret/${base}" ]] || continue
@@ -17,7 +17,7 @@ for base in secret.env config.yaml; do
   echo "Info: ${svc} 缺 ${base}，已從 .example 複製佔位值"
   # 用 if 而非 `[[ … ]] && cmd`——AND-list 在 errexit 下條件為假會讓整支腳本以 1 退出
   # 走 Info: 而非 Warning:——慣例不另設 Warn 級，警告也走 Info:
-  # （見工作區 `CLAUDE.md` §風格 的〈終端輸出慣例〉）。緊迫感靠文字本身承載，不靠前綴；
+  # （見工作區根 repo 的 `.claude/rules/terminal-output.md`〈營運腳本的狀態前綴〉）。緊迫感靠文字本身承載，不靠前綴；
   # Warning: 曾是全 repo 唯一一處，這裡改回 Info: 消除它。
   if [[ "${verb}" == apply ]]; then
     echo "Info: ${svc} 目前用的是 .example 佔位值，不是真密碼"
@@ -29,7 +29,7 @@ confirm() {
   # `|| true` 不可省：set -e 下 read 遇 EOF（無 tty、管線呼叫）回非零會直接中止腳本，
   # 走不到下一行的比對，取消訊息就永遠印不出來。放行後 ans 為空字串，比對照樣失敗。
   read -r -p "刪除 ${svc}（${track}），含資料卷、不可逆。輸入服務名確認：" ans || true
-  # 取消走 Info: 而非 Error:（見工作區 `CLAUDE.md` §風格 的〈終端輸出慣例〉）。使用者主動放棄不是錯誤，
+  # 取消走 Info: 而非 Error:（見工作區根 repo 的 `.claude/rules/terminal-output.md`〈營運腳本的狀態前綴〉）。使用者主動放棄不是錯誤，
   # 且 Error: 要送 stderr，訊息就不會留在 stdout 上讓呼叫端看見。
   [[ "${ans}" == "${svc}" ]] || { echo "Info: 已取消（輸入的名稱與服務名不符）"; exit 1; }
 }
@@ -38,7 +38,7 @@ confirm() {
 case "${verb}:${track}" in
   apply:k8s)     kubectl apply -k "${here}/k8s" ;;
   apply:podman*) kubectl kustomize "${here}/${track}" | sudo podman kube play --replace - ;;
-  # delete 直接吃 kustomize 產物，不做「不依賴機密檔」的防禦（K11，單機工作流）
+  # delete 直接吃 kustomize 產物，不做「不依賴機密檔」的防禦（單機工作流）
   delete:k8s)    confirm
                  kubectl delete -k "${here}/k8s" --ignore-not-found
                  # StatefulSet 的 volumeClaimTemplates PVC 不在 manifest 內（k8s 動態建立），
@@ -51,7 +51,7 @@ case "${verb}:${track}" in
                      | { grep -- "-${svc}-" || true; } \
                      | { grep . && echo "Info: 上列為 StatefulSet 動態 PVC，delete 不移除；如需清除請執行 kubectl delete <名稱>" || true; } ; } \
                    || echo "Info: 無法列出 PVC，請自行以 kubectl get pvc 確認是否有 StatefulSet 動態卷殘留" ;;
-  # podman 4.9.3（K12）：yaml 含 PVC 時 --force 會印 Volumes removed 後又 exit 125 no such volume，
+  # podman 4.9.3：yaml 含 PVC 時 --force 會印 Volumes removed 後又 exit 125 no such volume，
   # volume 其實已刪，是假錯誤（用檔案參數 100% 重現，與 stdin 無關）。set -e 下不處理會誤中止。
   delete:podman*) confirm
                   # kustomize 先獨立跑：它失敗必須 fail loud，不能被下面的 || 一起吞掉。
