@@ -4,6 +4,7 @@
 # 機密（root 帳密）由 ../secret 的 secretGenerator 產生（Secret minio）。
 # 本軌不引用 ../base：podman kube play 不支援 StatefulSet（實測 exit 125），自帶 pod.yaml 與 images:。
 # namespace 對 podman kube play 無作用，保留是為了與 k8s 軌產物一致。
+# digest: 的值要帶 sha256: 前綴，理由見 services/minio/base/kustomization.yaml。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
