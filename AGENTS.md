@@ -30,7 +30,7 @@
 
 新開的 worktree 沒有 gitignored 的機密檔，`apply` 會補上 `.example` 佔位值。已經在跑的服務，資料庫卷是用真密碼建的，換成佔位值就連不上。
 
-- 從主工作樹複製真值檔進 worktree，用 `cp -p` 保留 600 權限。
+- 從主工作樹複製真值檔進 worktree，用 `cp -p` 保留原權限。
 - `git worktree remove` 會連同 worktree 裡的機密檔一起刪掉，主工作樹要留一份。
 - `task litellm:check` 也從兩份 `secret.env` 讀 key，在 worktree 裡跑之前同樣要先複製。
 
@@ -65,9 +65,9 @@ manifest 的 `image:` 寫短名，完整參照在 `kustomization.yaml` 的 `imag
 
 能擋這件事的是 `bin/assert-images.sh`，它只在 `task image:check` 跑，**push 時不會跑**：共用護欄只收全部 repo 都適用的檢查。改了 `images:` 或 manifest 的 `image:`，要自己跑。
 
-### `services/` 底下不要寫 registry host 字面值
+### `services/` 底下不要寫 `docker.io/` 字面值
 
-push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。要舉例時，改講法或指路徑（「見 `services/<svc>/<軌>/kustomization.yaml` 的 `images:`」），不要寫出完整主機路徑。哪些路徑不掃、樣式寫在哪，見工作區根 repo 的 `.claude/rules/githooks.md`〈各道掃描的例外不一樣〉。
+push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它只擋 `docker.io/` 與指向浮動分支的 `raw/<分支>/`，不擋 quay、ghcr 等上游，所以 `images:` 的 `newName:` 可以寫 `quay.io/...`。映像要用 mirror，不要直接寫 `docker.io/`。要舉例時，改講法或指路徑（「見 `services/<svc>/<軌>/kustomization.yaml` 的 `images:`」）。哪些路徑不掃，見工作區根 repo 的 `.claude/rules/githooks.md`〈各道掃描的例外不一樣〉；樣式清單見工作區根 repo 的 `.githooks/forbidden-patterns.txt`。
 
 ### 手動跑 `kubectl kustomize` 前，要先備好機密檔
 
@@ -82,7 +82,7 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 ### podman 的 pod 名與跨 pod 名稱跟著 kind 變
 
 - `kind: Pod` 起出來的 pod 叫 `<svc>`；`Deployment`、`DaemonSet` 叫 `<svc>-pod`，容器叫 `<svc>-pod-<容器名>`。`podman pod stop`、`logs` 這類指令要跟著改。
-- podman 軌沒有 Service，別的 pod 要用「Deployment 名加 `-pod`」連，例如 `http://litellm-pod:4000`。base 裡寫 K8s Service 名的 env，podman 軌的 overlay 要改寫。
+- podman 軌沒有 Service，別的 pod 要用「Deployment 名加 `-pod`」連，例如 `http://litellm-pod:4000`。base 裡寫 K8s Service 名的 env，podman 軌的 overlay 要改寫。例外是 `services/litellm/base/config.yaml`：它是 ConfigMap 檔，`api_base` 直接寫 podman 名，k8s overlay 不改寫。
 - podman 掛 GPU 要寫 CDI 名稱（`nvidia.com/gpu=all` 或編號 `nvidia.com/gpu=0`），由 overlay 從 base 的 K8s 鍵換過來。同一個 pod 裡混用不同編號還沒驗過：第一次這樣部署時，進每個容器跑 `nvidia-smi`，確認它只看得到自己那張卡。
 
 ### 同一張卡上的 GPU 記憶體要跨服務一起算
@@ -125,7 +125,7 @@ bash bin/assert-images.sh <svc>        # 渲染產物的 image 都是完整參�
 task litellm:check                     # 實機回歸：對執行中的 litellm 跑 DLP 與分流情境。重新部署 litellm 後必跑
 ```
 
-- `task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，檔尾一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對它零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。
+- `task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務（該任務逐行列出測試檔，不會自動收新檔），檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。
 - `python3 -m pytest tests/` 也能跑同一批測試，但會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。
 - `task litellm:check` 呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。

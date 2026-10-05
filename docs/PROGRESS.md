@@ -6,7 +6,7 @@
 - 加一道檢查，比對 quay 兩處密碼：`secret.env` 的 `DB_PASSWORD`、`REDIS_PASSWORD`，與 `config.yaml` 的 `DB_URI`、`BUILDLOGS_REDIS` 內嵌的密碼。不一致時渲染與 `apply` 都成功，quay 起得來但連不上 DB；檢查不能印出值
 - `task test` 改成每支測試檔都要印 `ALL <n> PASS`，沒印就算失敗。現在漏寫 `__main__` 的測試檔零輸出、回 0，`task test` 會把它當成通過
 - 安裝 `yamllint`，對全部 `kustomization.yaml` 跑一次語法檢查
-- 做 `vllm` 的 k8s 軌：拆成一個 pod 一個容器，並打通聊天
+- 做 `vllm` 的 k8s 軌：拆成一個 pod 一個容器，並打通聊天。k8s overlay 要改寫 litellm `config.yaml` 的 `api_base`（現在寫 podman 名，k8s 軌的本地別名連不到）
 
 **以下有觸發條件才做：**
 

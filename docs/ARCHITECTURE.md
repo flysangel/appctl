@@ -79,7 +79,7 @@ manifest 的 `image:` 寫短名（例如 `filebrowser`、`grafana-mariadb`），
 |---|---|---|---|
 | env 型機密 | `services/<svc>/secret/secret.env`（gitignored） | `secretGenerator` 的 `envs:` 產生 Secret；正本用 `secretKeyRef`、`envFrom` 引用 | 有 `secret/` 的服務 |
 | 檔案型機密 | `services/<svc>/secret/config.yaml`（gitignored），範本 `.example` 進版控 | `secretGenerator` 的 `files:` 直接吃真值檔；workload 用 `volumes[].secret` 掛成檔案 | 只有 quay（Secret `quay-conf`） |
-| 非機密設定檔 | 真檔直接放在正本目錄 | `configMapGenerator`；workload 用 `configMap.name` 掛載 | quay（`initdb.sql`）、ncb（`default.conf`）、litellm（`config.yaml`） |
+| 非機密設定檔 | 真檔放在產生它的 kustomize 目錄（quay、litellm 在 `base/`；ncb 只在 `podman/`，因為只有 podman 軌） | `configMapGenerator`；workload 用 `configMap.name` 掛載 | quay（`initdb.sql`）、ncb（`default.conf`）、litellm（`config.yaml`） |
 
 kustomize 的 load restrictor 擋裸檔案路徑，不擋目錄型 resource。`envs: [../secret.env]` 會失敗，`resources: [../secret]` 可以：`resources:` 指向的目錄自成一個 kustomize root，`namespace:` 也會正確套到產生的 Secret。所以不需要 `--load-restrictor LoadRestrictionsNone`，`kubectl apply -k` 可以直接用，`delete -k` 也涵蓋 Secret。
 
@@ -93,7 +93,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 |---|---|---|
 | 儲存 | 具名卷：`persistentVolumeClaim.claimName` 經 `podman kube play` 對應到本機具名卷 | PVC（叢集 StorageClass 動態供應）；`StatefulSet` 另有 `volumeClaimTemplates` |
 | 對外 | hostPort，綁主機所有介面 | Service 加 Ingress |
-| 跨 pod 名稱 | Deployment 名加 `-pod`，例如 `litellm-pod`；base 寫 Service 名的 env 由 overlay 改寫 | Service 名，例如 `litellm` |
+| 跨 pod 名稱 | Deployment 名加 `-pod`，例如 `litellm-pod`；base 寫 Service 名的 env 由 overlay 改寫（`litellm` 的 `config.yaml` 例外，直接寫 podman 名） | Service 名，例如 `litellm` |
 | GPU 資源鍵 | CDI 名稱 `nvidia.com/gpu=all`，由 overlay 從 base 的 K8s 鍵換過來 | `nvidia.com/gpu` |
 
 拓樸不同的服務只有 `minio`：podman 是單節點 `Pod`；k8s 是 `StatefulSet` 加多個 `volumeClaimTemplates` 與 headless Service。
@@ -104,7 +104,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 
 - 共享卷：同一個 pod 的多個容器掛同一個 volume，例如 gmm 的 guacamole 與 guacd 共用 `recordings`。沿用 `ReadWriteOnce`。
 - 暫時卷：`emptyDir` 加 `medium: Memory` 與 `sizeLimit`，用在 `/dev/shm`（xadm-lxqt、xadm-xfce）。pod 重啟就清空。
-- PVC 容量寫死在正本的 `pvc.yaml`。
+- PVC 容量寫死在 `k8s/pvc.yaml`；minio 寫在 `base/statefulset.yaml` 的 `volumeClaimTemplates`。
 
 ## 4. 設計取捨
 
