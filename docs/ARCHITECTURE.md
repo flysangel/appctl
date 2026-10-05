@@ -79,7 +79,7 @@ manifest 的 `image:` 寫短名（例如 `filebrowser`、`grafana-mariadb`），
 |---|---|---|---|
 | env 型機密 | `services/<svc>/secret/secret.env`（gitignored） | `secretGenerator` 的 `envs:` 產生 Secret；正本用 `secretKeyRef`、`envFrom` 引用 | 有 `secret/` 的服務 |
 | 檔案型機密 | `services/<svc>/secret/config.yaml`（gitignored），範本 `.example` 進版控 | `secretGenerator` 的 `files:` 直接吃真值檔；workload 用 `volumes[].secret` 掛成檔案 | 只有 quay（Secret `quay-conf`） |
-| 非機密設定檔 | 真檔直接放在正本目錄 | `configMapGenerator`；workload 用 `configMap.name` 掛載 | quay（`initdb.sql`）、ncb（`default.conf`）、litellm（`config.yaml`） |
+| 非機密設定檔 | 真檔放在產生它的 kustomize 目錄（quay、litellm 在 `base/`；ncb 只在 `podman/`，因為只有 podman 軌） | `configMapGenerator`；workload 用 `configMap.name` 掛載 | quay（`initdb.sql`）、ncb（`default.conf`）、litellm（`config.yaml`） |
 
 kustomize 的 load restrictor 擋裸檔案路徑，不擋目錄型 resource。`envs: [../secret.env]` 會失敗，`resources: [../secret]` 可以：`resources:` 指向的目錄自成一個 kustomize root，`namespace:` 也會正確套到產生的 Secret。所以不需要 `--load-restrictor LoadRestrictionsNone`，`kubectl apply -k` 可以直接用，`delete -k` 也涵蓋 Secret。
 
@@ -93,7 +93,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 |---|---|---|
 | 儲存 | 具名卷：`persistentVolumeClaim.claimName` 經 `podman kube play` 對應到本機具名卷 | PVC（叢集 StorageClass 動態供應）；`StatefulSet` 另有 `volumeClaimTemplates` |
 | 對外 | hostPort，綁主機所有介面 | Service 加 Ingress |
-| 跨 pod 名稱 | Deployment 名加 `-pod`，例如 `litellm-pod`；base 寫 Service 名的 env 由 overlay 改寫 | Service 名，例如 `litellm` |
+| 跨 pod 名稱 | Deployment 名加 `-pod`，例如 `litellm-pod`；base 寫 Service 名的 env 由 overlay 改寫（`litellm` 的 `config.yaml` 例外，直接寫 podman 名） | Service 名，例如 `litellm` |
 | GPU 資源鍵 | CDI 名稱 `nvidia.com/gpu=all`，由 overlay 從 base 的 K8s 鍵換過來 | `nvidia.com/gpu` |
 
 拓樸不同的服務只有 `minio`：podman 是單節點 `Pod`；k8s 是 `StatefulSet` 加多個 `volumeClaimTemplates` 與 headless Service。
@@ -104,7 +104,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 
 - 共享卷：同一個 pod 的多個容器掛同一個 volume，例如 gmm 的 guacamole 與 guacd 共用 `recordings`。沿用 `ReadWriteOnce`。
 - 暫時卷：`emptyDir` 加 `medium: Memory` 與 `sizeLimit`，用在 `/dev/shm`（xadm-lxqt、xadm-xfce）。pod 重啟就清空。
-- PVC 容量寫死在正本的 `pvc.yaml`。
+- PVC 容量寫死在 `k8s/pvc.yaml`；minio 寫在 `base/statefulset.yaml` 的 `volumeClaimTemplates`。
 
 ## 4. 設計取捨
 
@@ -117,7 +117,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 | 機密用 `secretGenerator` 宣告在 `secret/`，兩軌共用 | `apply -k`、`delete -k` 直接涵蓋 Secret，腳本不必自己建、自己刪 | 真值檔不在時整個部署流程（含純本地 `kubectl kustomize`）都失敗，要靠 `.example` 佔位值補位 |
 | Secret 與 ConfigMap 名稱不加內容雜湊 | podman 的 secret store 沒有 owner reference 與 GC，雜湊輪替會留下永久孤兒；`delete -k` 也只刪得掉當下那個雜湊 | 改機密或設定不會觸發滾動更新；k8s 軌改 litellm 設定後要手動 `rollout restart`。雜湊政策寫在共用的 `secret/`，不能分軌設定 |
 | quay 的 `config.yaml` 不進版控 | `secretGenerator` 的 `files:` 不做變數替換，含密碼的設定檔只能整份當真值檔維護 | 換機器要照 `.example` 手抄並填回機密欄位；`.example` 補位只保證跑得起來，不保證跑得對 |
-| PVC 容量寫死在正本 | 單一環境下這個值不會變；抽成參數會讓它看起來可以隨時調整 | 要改容量得改正本，而且只在第一次部署生效 |
+| PVC 容量寫死在 `k8s/pvc.yaml`（minio 在 `volumeClaimTemplates`） | 單一環境下這個值不會變；抽成參數會讓它看起來可以隨時調整 | 要改容量得改這些檔，而且只在第一次部署生效 |
 | 不留部署鉤子（`post-apply.sh`） | 這個機制存在過三個版本，始終沒有任何服務用到 | 真的需要「部署後才能做的初始化」時要重新設計，目前由 `task seed` 扮演這個角色 |
 | 映像優先用 tag 釘，不用 digest | 和其他服務的寫法一致，比較好讀 | 同一個 tag 可能被重推，不像 digest 保證不可變。minio 與 juicefs 還是 digest，因為 mirror 沒有版本 tag |
 | push 護欄是黑名單、盡力而為的第二道防線 | 主防線是真值與浮動參照不寫進版控；黑名單只能擋已知的樣式 | 沒列進黑名單的寫法擋不到 |

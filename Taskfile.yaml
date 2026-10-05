@@ -25,7 +25,7 @@ tasks:
       - python3 tests/live_gateway.py
 
   image:check:
-    desc: '確認 image pin（版本釘選）仍存在於來源 registry（skopeo inspect；用法：task image:check SVC=grafana）'
+    desc: '確認渲染後每個 image 都是完整參照，且仍存在於來源 registry（skopeo inspect；用法：task image:check SVC=grafana）'
     preconditions:
       - sh: "[ -n '{{.SVC}}' ]"
         msg: '用法：task image:check SVC=grafana（未提供 SVC）'
@@ -35,8 +35,7 @@ tasks:
   apply:
     desc: '部署服務（用法：task apply SVC=grafana TRACK=podman）'
     summary: |
-      轉派至 bin/svc.sh。k8s 軌 kubectl apply -k、podman 軌 kubectl kustomize 管線接 podman kube play：
-      k8s 軌 kubectl apply、podman 軌 podman kube play --replace（需 sudo）。
+      轉派至 bin/svc.sh。k8s 軌跑 kubectl apply -k；podman 軌把 kubectl kustomize 的輸出接給 sudo podman kube play --replace。
       k8s 軌套用到當前 KUBECONFIG context 所指的叢集，namespace 由該軌 kustomization.yaml 的 namespace 欄決定。
     preconditions:
       - sh: "[ -n '{{.SVC}}' ]"
