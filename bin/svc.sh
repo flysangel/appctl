@@ -15,9 +15,9 @@ for base in secret.env config.yaml; do
   [[ -f "${ex}" && ! -f "${here}/secret/${base}" ]] || continue
   cp "${ex}" "${here}/secret/${base}"
   echo "Info: ${svc} 缺 ${base}，已從 .example 複製佔位值"
-  # 用 if，讓迴圈的結束碼固定為 0：之後把迴圈移到檔尾，也不會因 AND-list 條件為假而讓整支腳本以 1 退出。
+  # 用 if，讓迴圈的結束碼固定為 0。這樣之後把迴圈移到檔尾時，AND-list 條件為假也不會讓整支腳本以 1 退出。
   # 走 Info: 而非 Warning:——慣例不另設 Warn 級，警告也走 Info:
-  # （見工作區根 repo 的 `.claude/rules/terminal-output.md`〈營運腳本的狀態前綴〉）。緊迫感靠文字本身承載，不靠前綴。
+  # （見工作區根 repo 的 `.claude/rules/terminal-output.md`〈營運腳本的狀態前綴〉）。要表達緊急，寫在訊息文字裡，不用前綴表達。
   if [[ "${verb}" == apply ]]; then
     echo "Info: ${svc} 目前用的是 .example 佔位值，不是真密碼"
     echo "Info: apply 出去的服務會連不上相依元件"
@@ -42,7 +42,7 @@ case "${verb}:${track}" in
                  kubectl delete -k "${here}/k8s" --ignore-not-found
                  # StatefulSet 的 volumeClaimTemplates PVC 不在 manifest 內（k8s 動態建立），
                  # 故不隨 delete 移除——這是 k8s 原生語意，需顯式清除。全 repo 僅 minio 命中。
-                 # -n default：全部服務的 namespace 皆為 default，與各軌 kustomization.yaml
+                 # -n default：全部服務的 namespace 都是 default，與各軌 kustomization.yaml
                  # 的 namespace: 一致；吃 kubeconfig 當前 namespace 若 context 設過會靜默掃錯地方。
                  # 整條 pipeline 加容錯：這段只是刪除後的純提示，失敗不該讓已經成功的 delete
                  # 以非零退出，但也不能靜默吞掉——失敗時明講「請自行確認」。
