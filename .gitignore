@@ -21,7 +21,8 @@ __pycache__/
 *.pyc
 
 # 機密檔卷真值（quay config.yaml 等）；範本 .example 仍入庫。
-# 需先解除上方機密段 **/secrets/ 的目錄級排除（否則 git 不下降、下方放行無效），再排除內容、再放行 example。
+# 這段分三步：先解除上方機密段 **/secrets/ 的目錄級排除，再排除內容，最後放行 example。
+# 不先解除，git 不會進入該目錄，下方的放行就無效。
 !services/*/secrets/
 services/*/secrets/**
 !services/*/secrets/**/
@@ -29,7 +30,7 @@ services/*/secrets/**
 
 # 單數 secret/：機密真值檔 deny-by-default，只放行範本與 kustomize 宣告。
 # 複數 secrets/ 的規則（上方）留給遷移期，遷移完成後可一併清掉。
-# quay 的 config.yaml 不是 .env，不受機密段的 *.env 保護，沒有這段會被 git 追蹤到明文密碼。
+# quay 的 config.yaml 不是 .env，機密段的 *.env 擋不到它。少了這段，git 會追蹤到明文密碼。
 !services/*/secret/
 services/*/secret/**
 !services/*/secret/**/

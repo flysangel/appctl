@@ -21,7 +21,7 @@
 | `kadm` | k8s 管理 SSH 堡壘（pod 內含 podman） | — | ✓ | 22100→22 | wk 10Gi |
 | `litellm` | LLM 統一出口（litellm proxy 加 postgresql） | ✓ | ✓ | 4000 | db 2Gi |
 | `minio` | S3 相容物件儲存 | ✓ | ✓ | 9000、9001 | podman：data；k8s：data0、data1 各 10Gi |
-| `ncb` | nginx 加 certbot 的 TLS 反向代理前門 | ✓ | — | 80、443 | certbot（容量由 podman 具名卷決定；`ncb-conf` 是 ConfigMap，不是卷） |
+| `ncb` | nginx 加 certbot 的 TLS 反向代理 | ✓ | — | 80、443 | certbot（容量由 podman 具名卷決定；`ncb-conf` 是 ConfigMap，不是卷） |
 | `openwebui` | Open WebUI 對話前端（webui 加 postgresql 含 pgvector，主資料庫兼向量庫） | ✓ | ✓ | 8080 | data 10Gi、db 5Gi |
 | `quay` | Project Quay 容器映像倉庫（quay-app、postgresql、redis） | ✓ | ✓ | 8080 | pg-data 2Gi、quay-data 5Gi |
 | `static-nginx` | 純靜態網頁 server | ✓ | ✓ | 80 | data 10Gi |
@@ -31,7 +31,7 @@
 
 - 服務只建一個軌的目錄，就代表另一軌不支援。`ncb` 的反向代理與 TLS 在 k8s 由叢集的 Ingress 與 cert-manager 負責；`kadm`、`xadm-*` 本來就是叢集內的管理工作站；`vllm` 的 k8s 軌還沒做。
 - 每個服務的工作負載正本在 `services/<svc>/base/`，兩軌的目錄只放各自的差異（podman 的 hostPort、k8s 的 Service、Ingress、PVC）。`minio` 是例外，原因見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈已知的結構性限制〉。
-- k8s 軌的 Ingress 主機名一律是 `<svc>.local`。有沒有 Ingress，看 `services/<svc>/k8s/ingress.yaml` 在不在；`juicefs`、`minio`、`iperf3`、`kadm`、`xadm-*` 不出 Ingress。
+- k8s 軌的 Ingress 主機名一律是 `<svc>.local`。有沒有 Ingress，看 `services/<svc>/k8s/ingress.yaml` 在不在；`juicefs`、`minio`、`iperf3`、`kadm`、`xadm-*` 沒有 Ingress。
 
 **`kadm`、`xadm-lxqt`、`xadm-xfce` 是最高權服務。** 三者都綁 `cluster-admin` ClusterRoleBinding、跑 `privileged` 容器、用映像內建的帳密，而且經 LoadBalancer 對外開 SSH 或 RDP。帳密不能輪換，外洩等於整座叢集淪陷，所以只能放在信任網段。
 

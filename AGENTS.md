@@ -125,7 +125,7 @@ bash bin/assert-images.sh <svc>        # 渲染產物的 image 都是完整參�
 task litellm:check                     # 實機回歸：對執行中的 litellm 跑 DLP 與分流情境。重新部署 litellm 後必跑
 ```
 
-- `task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務（該任務逐行列出測試檔，不會自動收新檔），檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。
+- `task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務。該任務逐行列出測試檔，不會自動收新檔。新檔的檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。
 - `python3 -m pytest tests/` 也能跑同一批測試，但會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。
 - `task litellm:check` 呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
