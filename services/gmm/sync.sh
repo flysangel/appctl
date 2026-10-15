@@ -1,6 +1,9 @@
 #!/bin/bash
 # sync.sh — 透過 guacamole 的 REST API 建立連線設定（具冪等性，含 cleanup 與 nmap 存活驗證）。用法：bash sync.sh [sync|test]
 # 設定讀取自同目錄的 sync.conf；對應表讀取自同目錄的 mapping.list（以 pipe 分隔，需恰好 10 欄）。屬 best-effort 營運工具。
+# 每行的順序：nmap 定名 → 記進 map → user → group（取 gid）→ connection（取 cid）→ sharing profile → permission。
+# gid 或 cid 取不到就跳過該行後半，但該行已記進 map，結尾的 cleanup 不會刪它。
+# 全部 curl 都不看回應，沒有 errexit，過了前置檢查後一律以 0 結束；失敗只在下一步「取 id 失敗」時以 Info 浮現。
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mode="${1:-sync}"
@@ -68,6 +71,7 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
   fi
   [[ -z "${gid}" ]] && { echo "Info: group ${connGroup} 取 id 失敗，跳過此行"; continue; }
 
+  # 協定參數寫死：rdp 帶 security nla 與 ignore-cert；ssh 帶配色與字級；其他值（含打錯字）走 fallback 只送四欄。connProtocol 不驗證。
   case "${connProtocol}" in
     rdp) params=$(jq -n --arg h "$connIP" --arg p "$connPort" --arg u "$connAccount" --arg w "$connPassword" --arg d "$connDomain" '{hostname:$h,port:$p,username:$u,password:$w,domain:$d,security:"nla","ignore-cert":"true"}') ;;
     ssh) params=$(jq -n --arg h "$connIP" --arg p "$connPort" --arg u "$connAccount" --arg w "$connPassword" '{hostname:$h,port:$p,username:$u,password:$w,"color-scheme":"black-white","font-size":"14"}') ;;

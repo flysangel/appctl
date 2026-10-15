@@ -35,18 +35,24 @@ spec:
             secretKeyRef:
               name: gmm
               key: MYSQL_PASSWORD
+        # TZ 設在 guacamole 與 mariadb，guacd 沒設；連線歷史與 ban 計時用這個時區。
         - name: TZ
           value: Asia/Taipei
+        # 只開英文 UI；不開 TOTP 二階段驗證。
         - name: ALLOWED_LANGUAGES
           value: en
+        # BAN 依來源 IP 封鎖；k8s 軌前面有 Ingress，不從 X-Forwarded-For 取 IP 會封掉全部人。
+        # podman 軌沒有代理，客戶端自帶的 X-Forwarded-For 會被信任，可偽造繞過封鎖。
         - name: REMOTE_IP_VALVE_ENABLED
           value: 'true'
+        # 開錄影：guacd 寫進 recordings 卷，guacamole 從同一卷讀來回放，所以兩容器共掛。
         - name: RECORDING_ENABLED
           value: 'true'
         - name: BAN_ENABLED
           value: 'true'
         - name: TOTP_ENABLED
           value: 'false'
+        # 不是上游的環境變數：images 的 gmm 映像自訂的登入頁 logo 開關，值對應映像內 images/ 目錄的檔名。換官方映像無效。
         - name: LOGO
           value: prometheus
         volumeMounts:
@@ -64,6 +70,7 @@ spec:
       - name: mariadb
         image: gmm-mariadb
         imagePullPolicy: IfNotPresent
+        # 連線名稱含全形括號與中文，server 預設字集不是 UTF-8 時會存壞或撞 unique key；只影響新建的庫與表。
         args:
         - --character-set-server=utf8mb4
         - --collation-server=utf8mb4_general_ci

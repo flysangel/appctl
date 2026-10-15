@@ -24,12 +24,14 @@ spec:
         volumeMounts:
         - name: quay-conf
           mountPath: /conf/stack
+        # config.yaml 的 storage_path 是 /datastorage/registry，要落在這個掛載點底下；改任一邊，映像會寫進容器層，pod 重建就丟。
         - name: quay-data
           mountPath: /datastorage
       - name: postgresql
         image: quay-postgresql
         imagePullPolicy: IfNotPresent
         env:
+        # 帳號與庫名同時出現在 config.yaml 的 DB_URI，兩處要一致；不一致時渲染與 apply 都成功，quay 連不上 DB。
         - name: POSTGRES_USER
           value: quayuser
         - name: POSTGRES_DB
@@ -44,6 +46,7 @@ spec:
           mountPath: /docker-entrypoint-initdb.d
         - name: pg-data
           mountPath: /var/lib/postgresql/data
+      # redis 沒掛卷：build log 與 user event 是暫態，pod 重建就清空。
       - name: redis
         image: quay-redis
         imagePullPolicy: IfNotPresent

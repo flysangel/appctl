@@ -22,8 +22,10 @@ spec:
         - containerPort: 3000
           protocol: TCP
         env:
+        # 每次容器啟動都連 grafana.com 安裝這些外掛，外掛沒釘版；要釘版寫「<id> <version>」，空白分隔。
         - name: GF_INSTALL_PLUGINS
           value: grafana-clock-panel,ryantxu-ajax-panel,yesoreyeram-infinity-datasource
+        # 儀表板、使用者、資料來源都存在同 pod 的 mariadb（db 卷）；data 卷只剩外掛與快取，可重建。
         - name: GF_DATABASE_TYPE
           value: mysql
         - name: GF_DATABASE_HOST
