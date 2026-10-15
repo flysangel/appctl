@@ -46,7 +46,7 @@
 
 ### 改映像版本
 
-改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `grep -rln 'digest: sha256:' services/` 找出全部位置。`vllm` 的容器共用同一顆映像，但短名各一筆，base 的每一筆都要改。
+改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見工作區根 repo 的 `AGENTS.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。`vllm` 的容器共用同一顆映像，但短名各一筆，base 的每一筆都要改。
 
 改完跑 `task image:check SVC=<svc>`。跨大版本時，查上游有沒有改啟動時序或設定介面。
 
@@ -67,7 +67,7 @@ manifest 的 `image:` 寫短名，完整參照在 `kustomization.yaml` 的 `imag
 
 ### `services/` 底下不要寫 `docker.io/` 字面值
 
-push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它只擋 `docker.io/` 與指向浮動分支的 `raw/<分支>/`，不擋 quay、ghcr 等上游，所以 `images:` 的 `newName:` 可以寫 `quay.io/...`。映像要用 mirror，不要直接寫 `docker.io/`。要舉例時，改講法或指路徑（「見 `services/<svc>/<軌>/kustomization.yaml` 的 `images:`」）。哪些路徑不掃，見工作區根 repo 的 `.claude/rules/githooks.md`〈各道掃描的例外不一樣〉；樣式清單見工作區根 repo 的 `.githooks/forbidden-patterns.txt`。
+push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它擋哪些樣式見工作區根 repo 的 `.githooks/forbidden-patterns.txt`，不要把樣式抄進本檔。映像要用 mirror 的完整參照，寫在 `services/<svc>/base/kustomization.yaml` 的 `images:`。要舉例時，改講法或指路徑。哪些路徑不掃，見工作區根 repo 的 `.claude/rules/githooks.md`〈各道掃描的例外不一樣〉。
 
 ### 手動跑 `kubectl kustomize` 前，要先備好機密檔
 
@@ -125,7 +125,7 @@ bash bin/assert-images.sh <svc>        # 渲染產物的 image 都是完整參�
 task litellm:check                     # 實機回歸：對執行中的 litellm 跑 DLP 與分流情境。重新部署 litellm 後必跑
 ```
 
-- `task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務。該任務逐行列出測試檔，不會自動收新檔。新檔的檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。
+- `task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務。該任務逐行列出測試檔，不會自動收新檔。新檔的檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。這兩個坑的消除法列在 `docs/PROGRESS.md`，做完就刪這段。
 - `python3 -m pytest tests/` 也能跑同一批測試，但會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。
 - `task litellm:check` 呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。

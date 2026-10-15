@@ -13,25 +13,27 @@
 
 | 服務 | 用途 | podman | k8s | 服務埠 | 持久卷 |
 |---|---|:-:|:-:|---|---|
-| `filebrowser` | 網頁檔案總管 | ✓ | ✓ | 4000 | data 10Gi |
-| `gmm` | Guacamole 遠端桌面閘道（guacamole、guacd、mariadb） | ✓ | ✓ | 8080 | recordings 1Gi、db 2Gi |
-| `grafana` | 儀表板（含 mariadb 後端） | ✓ | ✓ | 3000 | data 1Gi、db 2Gi |
+| `filebrowser` | 網頁檔案總管 | ✓ | ✓ | 4000 | data |
+| `gmm` | Guacamole 遠端桌面閘道（guacamole、guacd、mariadb） | ✓ | ✓ | 8080 | recordings、db |
+| `grafana` | 儀表板（含 mariadb 後端） | ✓ | ✓ | 3000 | data、db |
 | `iperf3` | 網路頻寬測試 server | ✓ | ✓ | 5201 | 無（無狀態） |
-| `juicefs` | JuiceFS 分散式檔案系統（S3-gateway 形態） | ✓ | ✓ | 9005 | obj 10Gi、meta 2Gi |
-| `kadm` | k8s 管理 SSH 堡壘（pod 內含 podman） | — | ✓ | 22100→22 | wk 10Gi |
-| `litellm` | LLM 統一出口（litellm proxy 加 postgresql） | ✓ | ✓ | 4000 | db 2Gi |
-| `minio` | S3 相容物件儲存 | ✓ | ✓ | 9000、9001 | podman：data；k8s：data0、data1 各 10Gi |
-| `ncb` | nginx 加 certbot 的 TLS 反向代理 | ✓ | — | 80、443 | certbot（容量由 podman 具名卷決定；`ncb-conf` 是 ConfigMap，不是卷） |
-| `openwebui` | Open WebUI 對話前端（webui 加 postgresql 含 pgvector，主資料庫兼向量庫） | ✓ | ✓ | 8080 | data 10Gi、db 5Gi |
-| `quay` | Project Quay 容器映像倉庫（quay-app、postgresql、redis） | ✓ | ✓ | 8080 | pg-data 2Gi、quay-data 5Gi |
-| `static-nginx` | 純靜態網頁 server | ✓ | ✓ | 80 | data 10Gi |
-| `vllm` | 地端推論（vLLM，掛 GPU；chat、embed、rerank 同卡共存） | ✓ | — | 8000、8001、8002（不開 hostPort） | models（具名卷） |
-| `xadm-lxqt` | k8s 圖形管理工作站（LXQt via xrdp） | — | ✓ | 33890→3389、22100→22 | wk 10Gi |
-| `xadm-xfce` | k8s 圖形管理工作站（XFCE4 via xrdp） | — | ✓ | 33890→3389、22100→22 | wk 10Gi |
+| `juicefs` | JuiceFS 分散式檔案系統（S3-gateway 形態） | ✓ | ✓ | 9005 | obj、meta |
+| `kadm` | k8s 管理 SSH 堡壘（pod 內含 podman） | — | ✓ | 22100→22 | wk |
+| `litellm` | LLM 統一出口（litellm proxy 加 postgresql） | ✓ | ✓（連不到地端模型，見 [docs/PROGRESS.md](docs/PROGRESS.md)） | 4000 | db |
+| `minio` | S3 相容物件儲存 | ✓ | ✓ | 9000、9001 | podman：data；k8s：data0、data1 |
+| `ncb` | nginx 加 certbot 的 TLS 反向代理 | ✓ | — | 80、443 | certbot（`ncb-conf` 是 ConfigMap，不是卷） |
+| `openwebui` | Open WebUI 對話前端（webui 加 postgresql 含 pgvector，主資料庫兼向量庫） | ✓ | ✓ | 8080 | data、db |
+| `quay` | Project Quay 容器映像倉庫（quay-app、postgresql、redis） | ✓ | ✓ | 8080 | pg-data、quay-data |
+| `static-nginx` | 純靜態網頁 server | ✓ | ✓ | 80 | data |
+| `vllm` | 地端推論（vLLM，掛 GPU；chat、embed、rerank 同卡共存） | ✓ | — | 8000、8001、8002（不開 hostPort） | models |
+| `xadm-lxqt` | k8s 圖形管理工作站（LXQt via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
+| `xadm-xfce` | k8s 圖形管理工作站（XFCE4 via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
 
+- 埠是 podman 軌的 hostPort 與 k8s 的 Service 埠，卷的容量以 `services/<svc>/k8s/pvc.yaml` 為準（minio 在 `base/statefulset.yaml`）。同一台主機的 podman 軌，同埠的服務不能同時跑。
+- `vllm`、`litellm`、`openwebui` 的 podman 軌只有依主機分軌的目錄，`TRACK` 要填 `podman-4060ti` 這類名稱；填 `podman` 會被守衛擋下。
 - 服務只建一個軌的目錄，就代表另一軌不支援。`ncb` 的反向代理與 TLS 在 k8s 由叢集的 Ingress 與 cert-manager 負責；`kadm`、`xadm-*` 本來就是叢集內的管理工作站；`vllm` 的 k8s 軌還沒做。
 - 每個服務的工作負載正本在 `services/<svc>/base/`，兩軌的目錄只放各自的差異（podman 的 hostPort、k8s 的 Service、Ingress、PVC）。`minio` 是例外，原因見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈已知的結構性限制〉。
-- k8s 軌的 Ingress 主機名一律是 `<svc>.local`。有沒有 Ingress，看 `services/<svc>/k8s/ingress.yaml` 在不在；`juicefs`、`minio`、`iperf3`、`kadm`、`xadm-*` 沒有 Ingress。
+- k8s 軌的 Ingress 主機名一律是 `<svc>.local`。有沒有 Ingress，看 `services/<svc>/k8s/ingress.yaml` 在不在。
 
 **`kadm`、`xadm-lxqt`、`xadm-xfce` 是最高權服務。** 三者都綁 `cluster-admin` ClusterRoleBinding、跑 `privileged` 容器、用映像內建的帳密，而且經 LoadBalancer 對外開 SSH 或 RDP。帳密不能輪換，外洩等於整座叢集淪陷，所以只能放在信任網段。
 
@@ -47,7 +49,7 @@
 | NVIDIA 驅動、container toolkit（CDI）、podman 5.7.0 | `vllm` 的 podman 軌掛 GPU；`nvidia-ctk cdi list` 要看得到 `nvidia.com/gpu=all`。podman 4.9.3 掛不到 GPU | 部署 `vllm` 時 |
 | `jq`、`curl`、`nmap` | `task seed` 營運工具 | 用到時 |
 
-k8s 軌另有兩項叢集前置：PVC 與 Ingress 刻意不指定 class，依賴叢集已經標好預設 StorageClass 與預設 IngressClass。
+k8s 軌另有叢集前置：PVC 與 Ingress 刻意不指定 class，依賴叢集已經標好預設 StorageClass 與預設 IngressClass；`kadm`、`xadm-*` 的 `LoadBalancer` Service 要叢集有 LB 提供者，否則卡在 pending。
 
 本 repo 是工作區的子 repo。push 護欄由工作區根 repo 管理，新機器跑工作區根 repo 的 `bin/bootstrap.sh` 就會接上。
 
@@ -56,7 +58,7 @@ k8s 軌另有兩項叢集前置：PVC 與 Ingress 刻意不指定 class，依賴
 ```bash
 # 1. 有機密的服務先填真值（gitignored）。哪些服務有機密：ls services/*/secret/secret.env.example
 cp services/<svc>/secret/secret.env.example services/<svc>/secret/secret.env
-cp services/quay/secret/config.yaml.example services/quay/secret/config.yaml       # quay 另有檔案型機密
+cp services/quay/secret/config.yaml.example services/quay/secret/config.yaml       # quay 另有檔案型機密，裡面的 DB 與 redis 密碼要和 secret.env 一致
 
 # 2. 部署
 task apply SVC=<svc> TRACK=podman                    # podman 軌
@@ -68,7 +70,7 @@ task delete SVC=<svc> TRACK=podman
 KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 ```
 
-**步驟 1 不做也跑得動，但跑起來的是假的。** 機密真值檔不在時，kustomize 直接失敗，所以 `bin/svc.sh` 會從 `.example` 複製一份佔位值頂上，`apply` 時多印兩行 `Info:` 說明「用的不是真密碼」。這樣部署出去的服務連不上相依元件。minio 更會用假的 root 帳密建資料卷，之後換真值得砍卷重來。
+**步驟 1 不做也跑得動，但跑起來的是假的。** 機密真值檔不在時，kustomize 直接失敗，所以 `bin/svc.sh` 會從 `.example` 複製一份佔位值頂上，`apply` 時多印兩行 `Info:` 說明「用的不是真密碼」。這樣部署出去的服務連不上相依元件。有資料卷的服務（minio、各家的資料庫）會用佔位密碼建卷，之後換真值得砍卷重來。
 
 `litellm` 的模型清單是 `services/litellm/base/config.yaml`，整份進版控，不必複製。
 
@@ -76,6 +78,8 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 - 雲端來源的金鑰填進 `services/litellm/secret/secret.env`，值不加引號。kustomize 會把引號當成值的一部分。
 - DLP 用 LiteLLM 內建的 guardrail，寫在 `config.yaml` 檔尾的 `guardrails`。公司自訂關鍵字改 `tw-dlp` 程式裡的 `KEYWORDS`，改完重新部署 `litellm` 才生效。
 - 直接指定雲端別名時，`tw-dlp` 阻擋含個資或圖片的請求。網頁聊天的 `chat-auto` 帶個資或圖片時，改由地端回答。
+
+`ncb` 第一次 `apply` 後要自己把憑證放進 certbot 卷，放進去之前 nginx 會反覆重啟。先放還是後放還在驗證，見 [docs/PROGRESS.md](docs/PROGRESS.md)。
 
 ### 實驗室的連線方式
 
@@ -97,10 +101,10 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 # gmm：佈建 guacamole 連線
 cp services/gmm/sync.conf.example services/gmm/sync.conf                 # 連線目標與非機密參數
 cp services/gmm/sync.secret.env.example services/gmm/sync.secret.env     # guacadmin 密碼
-cp services/gmm/mapping.list.example services/gmm/mapping.list           # 連線清單（pipe 分隔，恰好 10 欄）
+cp services/gmm/mapping.list.example services/gmm/mapping.list           # 連線清單（pipe 分隔，欄位照 mapping.list.example）
 task seed SVC=gmm                                                        # 唯讀檢查用 task seed:check，只驗 token、不寫入
 
-# openwebui：種下第一位 admin（安全時序：部署完成→立即 sync→才對外）。
+# openwebui：種下第一位 admin。podman 軌一 apply 就對網段開放，apply 完立刻 seed，縮短沒有 admin 的空窗。
 # 同一支還會寫入每個模型的系統提示詞（system-prompt.txt）與常駐橫幅（banner.txt）。
 # 語音開關照 sync.conf 的 VOICE_ENABLED 設。litellm 新增模型後要再跑一次
 cp services/openwebui/sync.conf.example services/openwebui/sync.conf
@@ -130,7 +134,7 @@ task image:check SVC=<svc>   # 渲染產物的每個 image 都解析成完整參
 
 要暫停但保留資料時，本介面不提供 `stop`，理由見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈設計取捨〉。改用原生工具：
 
-- k8s 軌：`kubectl scale -n <ns> --replicas=0 deployment/<name>`。`DaemonSet`（例如 `iperf3`）沒有 `replicas` 欄位，要停只能 `delete`。
+- k8s 軌：`kubectl scale -n <ns> --replicas=0 deployment/<name>`；`minio` 是 `statefulset/minio`。`DaemonSet`（例如 `iperf3`）沒有 `replicas` 欄位，要停只能 `delete`。
 - podman 軌：`sudo podman pod stop <svc>-pod`。`kube play` 吃 `Deployment`、`DaemonSet` 時 pod 名帶 `-pod` 後綴；`ncb` 與 `minio` 仍是 `<svc>`。
 - 恢復一律用 `task apply`。
 
@@ -141,13 +145,16 @@ task image:check SVC=<svc>   # 渲染產物的每個 image 都解析成完整參
 管理員發 key 與停用 key：
 
 ```bash
+# master key 在 services/litellm/secret/secret.env，先載進環境變數，不要貼進命令列
+set -a; . services/litellm/secret/secret.env; set +a
+
 # 發 key：key_alias 用 user-<帳號>，user_id 填 email。回應的 key 連同告知文字 key-notice.txt 一起交給使用者
-curl -s http://127.0.0.1:4000/key/generate -H "Authorization: Bearer <LITELLM_MASTER_KEY>" -H 'Content-Type: application/json' \
+curl -s http://127.0.0.1:4000/key/generate -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" -H 'Content-Type: application/json' \
   -d '{"key_alias":"user-<帳號>","user_id":"<email>"}' | jq -r .key
 
 # 停用：先用 key_alias 查出雜湊值。停用後這把 key 的請求回 401。要恢復時，同樣的指令改打 /key/unblock
-KEY_HASH="$(curl -s 'http://127.0.0.1:4000/key/list?key_alias=user-<帳號>&return_full_object=true' -H "Authorization: Bearer <LITELLM_MASTER_KEY>" | jq -r '.keys[0].token')"
-curl -s -X POST http://127.0.0.1:4000/key/block -H "Authorization: Bearer <LITELLM_MASTER_KEY>" -H 'Content-Type: application/json' -d "{\"key\":\"${KEY_HASH}\"}"
+KEY_HASH="$(curl -s 'http://127.0.0.1:4000/key/list?key_alias=user-<帳號>&return_full_object=true' -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" | jq -r '.keys[0].token')"
+curl -s -X POST http://127.0.0.1:4000/key/block -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" -H 'Content-Type: application/json' -d "{\"key\":\"${KEY_HASH}\"}"
 ```
 
 使用者設定 agent。Claude Code 先看這則警語：
