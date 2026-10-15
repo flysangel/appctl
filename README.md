@@ -35,7 +35,7 @@
 - 每個服務的工作負載正本在 `services/<svc>/base/`，兩軌的目錄只放各自的差異（podman 的 hostPort、k8s 的 Service、Ingress、PVC）。`minio` 是例外，原因見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈已知的結構性限制〉。
 - k8s 軌的 Ingress 主機名一律是 `<svc>.local`。有沒有 Ingress，看 `services/<svc>/k8s/ingress.yaml` 在不在。
 
-**`kadm`、`xadm-lxqt`、`xadm-xfce` 是最高權服務。** 三者都綁 `cluster-admin` ClusterRoleBinding、跑 `privileged` 容器、用映像內建的帳密，而且經 LoadBalancer 對外開 SSH 或 RDP。帳密不能輪換，外洩等於整座叢集淪陷，所以只能放在信任網段。
+**`kadm`、`xadm-lxqt`、`xadm-xfce` 是最高權服務。** 三者都綁 `cluster-admin` ClusterRoleBinding、跑 `privileged` 容器、用映像內建的帳密，而且經 LoadBalancer 對外開 SSH 或 RDP。帳密不能輪換，映像層裡還有 images 建置時留下的 bigred 無密碼私鑰，關掉密碼登入也擋不住（見 images 的 `docs/ARCHITECTURE.md` 裡講映像層私鑰那條）。外洩等於整座叢集淪陷，所以只能放在信任網段。
 
 ## 1. 前置需求
 

@@ -2,7 +2,7 @@
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
-- minio 與 juicefs 改用 tag 釘映像：先在 images repo 替 `quay.io/flysangel/minio/minio` 同步版本 tag（mirror 現在只有 `latest`），再改用 `command grep -rln 'digest: sha256:' services/` 列出的每份 `kustomization.yaml`
+- minio 與 juicefs 改用 tag 釘映像：先等 images 替 `minio/minio` 同步版本 tag（列在 images 的 `docs/PROGRESS.md`，mirror 現在只有 `latest`），再改用 `command grep -rln 'digest: sha256:' services/` 列出的每份 `kustomization.yaml`
 - 加一道檢查，比對 quay 兩處密碼：`secret.env` 的 `DB_PASSWORD`、`REDIS_PASSWORD`，與 `config.yaml` 的 `DB_URI`、`BUILDLOGS_REDIS` 內嵌的密碼。不一致時渲染與 `apply` 都成功，quay 起得來但連不上 DB；檢查不能印出值
 - `task test` 改成每支測試檔都要印 `ALL <n> PASS`，沒印就算失敗。現在漏寫 `__main__` 的測試檔零輸出、回 0，`task test` 會把它當成通過
 - `Taskfile.yaml` 的 `test` 改成自動收 `tests/test_*.py`，不逐行列檔。做完連同上一條，刪 `AGENTS.md`〈改完要驗〉講 `task test` 的那段

@@ -48,7 +48,7 @@
 
 改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見工作區根 repo 的 `AGENTS.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。`vllm` 的容器共用同一顆映像，但短名各一筆，base 的每一筆都要改。
 
-改完跑 `task image:check SVC=<svc>`。跨大版本時，查上游有沒有改啟動時序或設定介面。
+改完跑 `task image:check SVC=<svc>`。跨大版本時，查上游有沒有改啟動時序或設定介面。vllm 與 pgvector 的 mirror 只收目前使用的次版號（images 的 `sync/repository/vllm.yaml`、`pgvector.yaml`），升次版號要先去 images 改規則並同步一次，否則 `task image:check` 查不到映像。
 
 ### 寫程式的規矩
 
