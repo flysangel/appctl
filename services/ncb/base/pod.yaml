@@ -10,6 +10,8 @@ spec:
   - name: nginx
     image: ncb-nginx
     imagePullPolicy: IfNotPresent
+    # 每 168 小時 reload 一次，載入 certbot 續簽後的新憑證。reload 間隔要短於 certbot 的續簽提前量（certbot 文件：到期前 30 天）。
+    # 第一次 reload 要等 168 小時；手動放憑證後自己 reload 或重 apply。
     command:
     - /bin/sh
     - -c
@@ -29,6 +31,7 @@ spec:
   - name: certbot
     image: ncb-certbot
     imagePullPolicy: IfNotPresent
+    # 每 12 小時跑 renew；certbot 文件：renew 只處理 /etc/letsencrypt/renewal/ 有設定檔的憑證，手放進卷的沒有，等於沒做事。
     command:
     - /bin/sh
     - -c

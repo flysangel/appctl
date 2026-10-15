@@ -2,6 +2,8 @@
 # image 完整字面值見下方 images:，manifest 內只寫短名。
 # initdb.sql 兩軌內容相同，連同 configMapGenerator 一併收在此處；生成的 ConfigMap
 # 名為 quay-pg-init，manifest 以字面名引用（disableNameSuffixHash 讓名稱穩定）。
+# initdb.sql 建 pg_trgm 擴充，是 quay migration 的硬需求；/docker-entrypoint-initdb.d 只在資料目錄為空時執行，
+# 卷有資料後改 initdb.sql 再 apply 不會生效。
 # 機密（DB 密碼與 config.yaml）由各軌 overlay 的 ../secret 產生。
 resources:
   - deployment.yaml
@@ -17,6 +19,7 @@ images:
     newName: quay.io/flysangel/library/postgres
     # 純數字 tag 要加雙引號，不加時 kustomize 報 cannot unmarshal number（rc=1）
     newTag: "13.23"
+  # REDIS_PASSWORD 這個 env 只有 SCL 的 rhel8/redis-6 映像會讀；換成官方 redis 映像會忽略它，無認證啟動，quay 帶密碼連線反而失敗。
   - name: quay-redis
     newName: quay.io/flysangel/rhel8/redis-6
     newTag: "1-1785388756"

@@ -15,7 +15,7 @@
 
 ### 機密真值檔就在本機磁碟上
 
-有機密的服務（`ls services/*/secret/secret.env.example`），同目錄的 `secret.env` 存在且含真值，靠 `.gitignore` 擋住。quay 另有 `secret/config.yaml`，`gmm` 與 `openwebui` 另有 `sync.secret.env`。
+有機密的服務（`ls services/*/secret/secret.env.example`），同目錄的 `secret.env` 存在且含真值，靠 `.gitignore` 擋住。quay 另有 `secret/config.yaml`，`gmm` 與 `openwebui` 另有 `sync.secret.env`。gmm 還有兩個：`mapping.list` 含目標主機的明文帳密，`random.csv` 是 seed 自動產生的使用者密碼，唯一留存處。
 
 - 不要 `cat` 它們，不要把內容貼進任何輸出，不要 `git add -f`。
 - 要知道有哪些鍵，讀同目錄的 `.example`。
@@ -23,7 +23,8 @@
 ### 會刪資料的動作，先問使用者
 
 - `task delete`：k8s 軌連 manifest 內宣告的 PVC 一起刪，叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料跟著消失；podman 軌連具名卷一起移除。
-- `task seed SVC=gmm`：刪除 `mapping.list` 以外多餘的 user、group、connection。
+- `task seed SVC=gmm`：刪除 `mapping.list` 以外多餘的 user、group、connection。欄數不對的行會印 `Error` 跳過，但 cleanup 照跑，那一行的 user、group、connection 也算「以外」，一起被刪；`task seed:check` 不驗 `mapping.list`。改成解析失敗就中止列在 `docs/PROGRESS.md`。
+- `task delete SVC=ncb TRACK=podman`：連 `ncb-certbot` 卷刪掉，憑證一起消失。Let's Encrypt 的 rate limits 文件寫同一組網域每 7 天只簽 5 張重複憑證，刪了再簽會撞上限。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 是叢集最高權服務，帳密不能輪換。要部署前，先確認網段隔離。
 
 ### 從 worktree 部署前，先複製真值檔
@@ -48,7 +49,7 @@
 
 改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見工作區根 repo 的 `AGENTS.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。`vllm` 的容器共用同一顆映像，但短名各一筆，base 的每一筆都要改。
 
-改完跑 `task image:check SVC=<svc>`。跨大版本時，查上游有沒有改啟動時序或設定介面。vllm 與 pgvector 的 mirror 只收目前使用的次版號（images 的 `sync/repository/vllm.yaml`、`pgvector.yaml`），升次版號要先去 images 改規則並同步一次，否則 `task image:check` 查不到映像。
+改完跑 `task image:check SVC=<svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。vllm 與 pgvector 的 mirror 只收目前使用的次版號（images 的 `sync/repository/vllm.yaml`、`pgvector.yaml`），升次版號要先去 images 改規則並同步一次，否則 `task image:check` 查不到映像。
 
 ### 寫程式的規矩
 
@@ -82,6 +83,8 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 ### podman 的 pod 名與跨 pod 名稱跟著 kind 變
 
 - `kind: Pod` 起出來的 pod 叫 `<svc>`；`Deployment`、`DaemonSet` 叫 `<svc>-pod`，容器叫 `<svc>-pod-<容器名>`。`podman pod stop`、`logs` 這類指令要跟著改。
+- podman 軌是 rootful：`bin/svc.sh` 用 `sudo podman`。不加 `sudo` 的 `podman pod ps`、`podman volume ls`、`podman logs` 看的是你自己的 rootless 實例，什麼都查不到，看起來像服務沒起來。沒有 tty 時 sudo 要密碼會直接失敗，先 `sudo -v`。
+- `apply` 失敗時（例如 hostPort 被占）建一半的 pod 會留在系統裡繼續占埠，擋住下一個服務；`--replace` 只換同名 pod，不處理別的服務留下的。清法是 `sudo podman pod rm -f <pod>`。
 - podman 軌沒有 Service，別的 pod 要用「Deployment 名加 `-pod`」連，例如 `http://litellm-pod:4000`。base 裡寫 K8s Service 名的 env，podman 軌的 overlay 要改寫。例外是 `services/litellm/base/config.yaml`：它是 ConfigMap 檔，`api_base` 直接寫 podman 名，k8s overlay 不改寫。
 - podman 掛 GPU 要寫 CDI 名稱（`nvidia.com/gpu=all` 或編號 `nvidia.com/gpu=0`），由 overlay 從 base 的 K8s 鍵換過來。同一個 pod 裡混用不同編號還沒驗過：第一次這樣部署時，進每個容器跑 `nvidia-smi`，確認它只看得到自己那張卡。
 
@@ -129,7 +132,13 @@ task litellm:check                     # 實機回歸：對執行中的 litellm 
 - `python3 -m pytest tests/` 也能跑同一批測試，但會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。
 - `task litellm:check` 呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
-- 其他真環境煙測沒有腳本，要逐條手動跑。宣稱完成前，要真的跑過並貼出輸出。
+- 其他真環境煙測沒有腳本，要逐條手動跑。宣稱完成前，要真的跑過並貼出輸出。寫成腳本列在 `docs/PROGRESS.md`。順序：
+  1. `apply`。
+  2. 等 pod 到 Running。podman 軌用 `sudo podman pod inspect <pod> --format '{{.State}}'`，pod 不存在時回非零。
+  3. HTTP 探測。gmm：`GET /guacamole/` 回 2xx 或 3xx。grafana：`GET /api/health` 的 `.database` 是 `ok`。quay：`GET /health/instance` 回 200，第一次啟動要跑 migration，會等一陣子。ncb：`GET http://127.0.0.1/` 回 301。
+  4. 登入。gmm 用 `POST /guacamole/api/tokens` 取 `authToken`。
+  5. 再 `apply` 一次，重做第 2、3 步。
+  6. `delete`，確認 pod 與卷都不在。
 - 想手動驗一次 push 護欄，照工作區根 repo 的 `.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
 
 ## 5. 不要做的事
