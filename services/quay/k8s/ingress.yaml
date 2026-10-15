@@ -1,9 +1,9 @@
-# 沒設 proxy-body-size：nginx Ingress 預設 body 上限 1m，推映像層會 413。補上列在 docs/PROGRESS.md。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: quay
 spec:
+  # 沒設 proxy-body-size 註記：ingress-nginx 文件的預設 body 上限是 1m，推映像層會 413。補上列在 docs/PROGRESS.md。
   rules:
   - host: quay.local
     http:

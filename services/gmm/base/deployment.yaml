@@ -35,7 +35,7 @@ spec:
             secretKeyRef:
               name: gmm
               key: MYSQL_PASSWORD
-        # TZ 設在 guacamole 與 mariadb，guacd 沒設；連線歷史與 ban 計時用這個時區。
+        # TZ 設在 guacamole 與 mariadb，guacd 沒設。
         - name: TZ
           value: Asia/Taipei
         # 只開英文 UI；不開 TOTP 二階段驗證。
@@ -52,7 +52,7 @@ spec:
           value: 'true'
         - name: TOTP_ENABLED
           value: 'false'
-        # 不是上游的環境變數：images 的 gmm 映像自訂的登入頁 logo 開關，值對應映像內 images/ 目錄的檔名。換官方映像無效。
+        # 不是上游的環境變數：images 的 gmm 映像自訂的登入頁 logo 開關，值對應映像內 images/ 底下的目錄名。換官方映像無效。
         - name: LOGO
           value: prometheus
         volumeMounts:
@@ -70,7 +70,7 @@ spec:
       - name: mariadb
         image: gmm-mariadb
         imagePullPolicy: IfNotPresent
-        # 連線名稱含全形括號與中文，server 預設字集不是 UTF-8 時會存壞或撞 unique key；只影響新建的庫與表。
+        # 連線名稱含全形括號與中文，所以指定 utf8mb4。
         args:
         - --character-set-server=utf8mb4
         - --collation-server=utf8mb4_general_ci

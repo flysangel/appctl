@@ -1,4 +1,3 @@
-# 2Gi 與 5Gi 是實驗室尺寸，只在第一次部署生效。registry 卷隨 push 持續長，加上刪 tag 後兩週的保留期。
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -19,4 +18,5 @@ spec:
   - ReadWriteOnce
   resources:
     requests:
+      # 實驗室尺寸，只在第一次部署生效；registry 卷隨 push 持續長，加上刪 tag 後兩週的保留期。
       storage: 5Gi

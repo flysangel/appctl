@@ -40,8 +40,8 @@ services/<svc>/
     secret.env             機密真值（gitignored）
     config.yaml{,.example} （僅 quay）檔案型機密，真值 gitignored、範本進版控
   sync.sh                  （選配）營運工具，哪些服務有：ls services/*/sync.sh
-  sync.conf.example        （有 sync.sh 者）連線目標與非機密參數的範本；真檔 sync.conf gitignored
-  sync.secret.env.example  （有 sync.sh 者）sync 用密碼的範本；真檔 gitignored
+  sync.conf.example        連線目標與非機密參數的範本，哪些服務有：ls services/*/sync.conf.example；真檔 gitignored
+  sync.secret.env.example  sync 用密碼的範本，哪些服務有：ls services/*/sync.secret.env.example；真檔 gitignored
   mapping.list.example     （僅 gmm）連線清單範本；真檔 mapping.list 與 seed 產出的 random.csv 都 gitignored
   agents/                  （僅 litellm）coding agent 的設定範例與發 key 的告知文字，不進 kustomize
 ```
@@ -119,7 +119,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 
 | 取捨 | 選了什麼 | 代價 |
 |---|---|---|
-| 動詞只有 `apply`、`delete`，不提供 `stop` | 命令式的暫停會讓叢集實況與 manifest 正本分岔，下次 `apply` 會靜默把服務拉回 | 要暫停得退回原生工具（`kubectl scale --replicas=0`、`podman pod stop <svc>-pod`）；`delete` 連卷刪，沒有「拆 pod 留卷」的動詞，要留卷只能繞過 `task`（見 README〈拆除與暫停〉） |
+| 動詞只有 `apply`、`delete`，不提供 `stop` | 命令式的暫停會讓叢集實況與 manifest 正本分岔，下次 `apply` 會靜默把服務拉回 | 要暫停得退回原生工具（`kubectl scale --replicas=0`、`podman pod stop <svc>-pod`）；`delete` 連卷刪，沒有「拆 pod 留卷」的動詞，要留卷只能繞過 `task`（待驗的做法列在 `docs/PROGRESS.md`） |
 | 工作負載收在共用 `base/`，兩軌只寫差異 | 兩軌對齊 kind 後，kustomize 原生的 base 與 overlay 就抽得乾淨，不需要自訂抽象；版號每個服務只寫一處 | `minio` 對不齊（見〈已知的結構性限制〉）；podman 軌的 `hostPort` 要靠 overlay patch 帶入 |
 | 映像參照直接寫在 `images:`，不做 `${REGISTRY_PREFIX}` 間接層，也不經 `envsubst` | 零字串替換，正本可以直接 `kubectl apply -k`；佔位用途只有 image 與 namespace，kustomize 原生欄位全部涵蓋 | 換 registry 要改每個服務的 `images:`；ncb 的 `server_name`、憑證路徑、上游三處寫死在 `default.conf`，只服務一個網域，多站要複製 server 區塊 |
 | manifest 只寫短名，短名一律帶服務名 | 帶服務名的短名在 Docker Hub 官方庫都不存在，`images:` 漏列時一定失敗；規則沒有例外，不需要 lint 執法 | `grafana-grafana`、`quay-quay-app` 這類重複字樣讀起來笨拙 |
@@ -135,10 +135,10 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 | DLP 用 LiteLLM 內建的 guardrail：`custom_code` 的 `tw-dlp`，只綁在雲端別名上 | 實測多個候選，只有模型層 guardrail 沒有外洩，也不會連送地端的請求一起擋；fallback 到雲端時也會檢查。內建的 `content_filter` 不收 `structured_messages`，漏掉 `/v1/responses` 的 `instructions`；只看 `model` 決定要不要檢查的寫法，擋不住 fallback 到雲端的那一次 | 阻擋時回 200 加合成回答，不是錯誤；`chat-auto` 改由地端回答時沒有提示；新增雲端模型忘了綁就不檢查 |
 | podman 軌的 hostPort 都不設 hostIP，綁主機全部介面，對實驗室網段開放 | 實驗室其他主機要直接用網頁與 agent（litellm、openwebui）；manifest 不寫死主機 IP，換主機照用 | 每個 hostPort 都是 HTTP 明文：`/ui` 的 master key、gmm 的登入密碼與遠端桌面帳密都明文傳送；主機沒有防火牆，連得到主機的網段都能連每個 hostPort |
 | LiteLLM 不上 Redis，只跑 1 個 worker 與 1 個副本 | 限流、預算與路由狀態要加 worker 或副本才需要共用；LiteLLM 只轉送請求，推論在 vLLM，加了也不會變快 | 重新部署 LiteLLM 時服務中斷，沒有零停機 |
-| 動詞固定四個，服務與軌用 `SVC=`、`TRACK=` 帶入，不每服務開一份 taskfile | 服務多了 taskfile 不會跟著長；`includes` 與 `dir:` 的路徑坑一次都不用踩 | `task --list-all` 看不出有哪些服務，要 `ls services/` |
-| `bin/svc.sh` 不做 preflight，只驗 `services/<svc>/<軌>/` 目錄存在 | sudo、工具、埠占用、同名 pod 的檢查 kubectl 與 podman 自己都會報 | 錯誤訊息來自 kubectl 或 podman，不是腳本；hostPort 被占時建一半的 pod 會留著，見 AGENTS〈地雷〉 |
+| 動詞固定（清單用 `task --list-all` 查），服務與軌用 `SVC=`、`TRACK=` 帶入，不每服務開一份 taskfile | 服務多了 taskfile 不會跟著長；`includes` 與 `dir:` 的路徑坑一次都不用踩 | `task --list-all` 看不出有哪些服務，要 `ls services/` |
+| `bin/svc.sh` 不做 preflight，只驗 `services/<svc>/<軌>/` 目錄存在 | sudo、工具、埠占用、同名 pod 的檢查 kubectl 與 podman 自己都會報 | 錯誤訊息來自 kubectl 或 podman，不是腳本；hostPort 被占時建一半的 pod 會留著，見 `AGENTS.md`〈地雷〉 |
 | 全部服務部署到 `default` namespace，腳本不建 namespace | 單一環境不需要用 namespace 隔離；`delete` 列 PVC 時可以寫死 `-n default` | overlay 的 `namespace:` 改成叢集沒有的名字，`apply -k` 直接失敗 |
-| 營運工具（`task seed`）在操作者主機跑 `services/<svc>/sync.sh`，不放進叢集排程 | 機密從本機 gitignored 檔讀，manifest 不放真值，也不在執行期 clone repo | 要排程得靠主機的 cron；`sync.sh` 要在主機上裝 `jq`、`curl`、`nmap` |
+| 營運工具（`task seed`）在操作者主機跑 `services/<svc>/sync.sh`，不放進叢集排程 | 機密從本機 gitignored 檔讀，manifest 不放真值，也不在執行期 clone repo | 要排程得靠主機的 cron；各 `sync.sh` 要的工具得裝在主機上（見 `README.md`〈前置需求〉） |
 | quay 的 quay-app、postgres、redis 放同一個 pod | config.yaml 的 DB 與 redis host 都寫 `127.0.0.1`，兩軌共用同一份，不必像 litellm 由 overlay 改寫 | 三容器沒有啟動順序控制（待辦在 `docs/PROGRESS.md`）；quay-app 不能獨立擴 |
 | podman 軌用具名卷，不用 hostPath | 免掉建目錄、`setfacl` 給容器 uid 寫入權、清理白名單、`.gitignore` 排除 runtime 目錄四件事；所有權與生命週期由 podman 管 | 資料不在 repo 目錄下，取檔要 `sudo podman volume inspect` 找 mountpoint，備份走 `podman volume export` |
 
@@ -152,7 +152,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 
 - `minio` 兩軌不能共用 `base/`：`podman kube play` 不支援 `kind: StatefulSet`（實測 exit 125）。它的 podman 軌自帶 `pod.yaml` 與 `images:`，改版號要動兩處。podman 4.9.3 的 `man podman-kube-play` 列的支援 kind 也沒有 Job 與 CronJob，所以本 repo 沒有週期性工作負載，週期動作寫進容器 `command`（ncb 的 certbot 每 12 小時 `renew`、nginx 每 168 小時 reload）。
 - quay 用 `LocalStorage` 寫 `/datastorage/registry`，k8s 的 PVC 是 `ReadWriteOnce`，quay-app 只能 1 個副本。
-- ncb 的 `server_name` 是 `ncb.local`：`.local` 是 mDNS 保留域，ACME 不簽。手放進卷的憑證沒有 renewal 設定檔，certbot 容器的 `renew` 迴圈沒有東西可續，回 0 不報錯。憑證只能自簽或用內部 CA；要用 Let's Encrypt 得改成公網網域，而公網 DNS 不在本 repo 範圍。certbot 容器的去留列在 `docs/PROGRESS.md`。
+- ncb 的 `server_name` 是 `ncb.local`：`.local` 是 mDNS 保留域（RFC 6762），ACME 不簽。手放進卷的憑證沒有 renewal 設定檔，certbot 容器的 `renew` 迴圈沒有東西可續，回 0 不報錯。憑證只能自簽或用內部 CA；要用 Let's Encrypt 得改成公網網域，而公網 DNS 不在本 repo 範圍。certbot 容器的去留列在 `docs/PROGRESS.md`。
 - gmm 的 `REMOTE_IP_VALVE_ENABLED=true` 讓 guacamole 從 `X-Forwarded-For` 取來源 IP，`BAN_ENABLED` 的暴力登入封鎖才封得到人而不是封掉 Ingress。podman 軌前面沒有代理，客戶端自帶的 `X-Forwarded-For` 會被信任，可偽造繞過封鎖。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 經 LoadBalancer 對外開 SSH 或 RDP，與叢集最高權（`cluster-admin`）之間只隔一層映像內建的帳密，與一把建置時留在映像層裡的 bigred 無密碼私鑰（images 的 `docs/ARCHITECTURE.md` 裡講映像層私鑰那條，消除列在 images 的 `docs/PROGRESS.md`）。本 repo 沒有在執行期改密碼，也沒有關密碼登入。只能放在信任網段。
 - `iperf3` 的 5201 埠、`juicefs` 的 S3 9005 埠沒有額外認證，只能放在信任網段。juicefs 的 metadata 是 SQLite，只能單寫；它的 minio sidecar 是單節點。

@@ -21,9 +21,9 @@
 | `kadm` | k8s 管理 SSH 堡壘（pod 內含 podman） | — | ✓ | 22100→22 | wk |
 | `litellm` | LLM 統一出口（litellm proxy 加 postgresql） | ✓ | ✓（連不到地端模型，見 [docs/PROGRESS.md](docs/PROGRESS.md)） | 4000 | db |
 | `minio` | S3 相容物件儲存 | ✓ | ✓ | 9000、9001 | podman：data；k8s：data0、data1 |
-| `ncb` | nginx 加 certbot 的 TLS 反向代理，上游寫死為主機上 minio 的 9000 埠（改 `services/ncb/podman/default.conf`） | ✓ | — | 80、443 | certbot（`ncb-conf` 是 ConfigMap，不是卷） |
+| `ncb` | nginx 加 certbot 的 TLS 反向代理，上游是主機上的 minio 9000 | ✓ | — | 80、443 | certbot（`ncb-conf` 是 ConfigMap，不是卷） |
 | `openwebui` | Open WebUI 對話前端（webui 加 postgresql 含 pgvector，主資料庫兼向量庫） | ✓ | ✓ | 8080 | data、db |
-| `quay` | Project Quay 容器映像倉庫（quay-app、postgresql、redis）。只有 superuser 能建帳號，public repo 免登入可拉，登入用資料庫帳密 | ✓ | ✓ | 8080 | pg-data、quay-data |
+| `quay` | Project Quay 容器映像倉庫（quay-app、postgresql、redis） | ✓ | ✓ | 8080 | pg-data、quay-data |
 | `static-nginx` | 純靜態網頁 server | ✓ | ✓ | 80 | data |
 | `vllm` | 地端推論（vLLM，掛 GPU；chat、embed、rerank 同卡共存） | ✓ | — | 8000、8001、8002（不開 hostPort） | models |
 | `xadm-lxqt` | k8s 圖形管理工作站（LXQt via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
@@ -43,7 +43,7 @@
 |---|---|---|
 | `task` | 唯一入口 | 必要 |
 | `kubectl` | 渲染（內建 kustomize）與 k8s 部署 | 必要，podman 軌也要用它渲染 |
-| `podman` 與 `sudo` | podman 軌部署 | 走 podman 軌時 |
+| `podman` 與 `sudo` | podman 軌部署。podman 軌是 rootful，查狀態與 log 也要 `sudo`；沒有 tty 時先 `sudo -v` | 走 podman 軌時 |
 | `python3` 與 PyYAML | 單元測試、`manifest-diff` | 必要 |
 | `skopeo` | `task image:check` 查映像是否還在來源 registry | 用到時 |
 | NVIDIA 驅動、container toolkit（CDI）、podman 5.7.0 | `vllm` 的 podman 軌掛 GPU；`nvidia-ctk cdi list` 要看得到 `nvidia.com/gpu=all`。podman 4.9.3 掛不到 GPU | 部署 `vllm` 時 |
@@ -83,18 +83,22 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 
 - 憑證放在具名卷 `ncb-certbot` 的 `live/ncb.local/fullchain.pem` 與 `privkey.pem`。mountpoint 用 `sudo podman volume inspect ncb-certbot` 查。改 `server_name` 時，`live/<名稱>/` 的目錄名要一起改。
 - nginx 的 443 區塊引用這兩個檔，檔不在時 nginx 起不來，80 埠也不聽。所以先放一組自簽憑證讓 nginx 起來。
-- `ncb.local` 是 mDNS 保留域，Let's Encrypt 不簽。要用 ACME 得先把 `server_name` 改成公網網域，再 `sudo podman exec ncb-certbot certbot certonly --webroot -w /etc/letsencrypt/www -d <網域> --email <信箱> --agree-tos`。第一次先加 `--staging` 試，正式環境同一組網域每 7 天只簽 5 張重複憑證。
-- 放完或簽完要 `sudo podman exec ncb-nginx nginx -s reload`，或重跑 `apply`。nginx 自己的 reload 迴圈每 7 天才跑一次。
+- `ncb.local` 是 mDNS 保留域（RFC 6762），Let's Encrypt 不簽。要用 ACME 得先把 `server_name` 改成公網網域，再 `sudo podman exec ncb-certbot certbot certonly --webroot -w /etc/letsencrypt/www -d <網域> --email <信箱> --agree-tos`。第一次先加 `--staging` 試：Let's Encrypt 的 rate limits 文件寫同一組網域每 7 天只簽 5 張重複憑證。
+- 放完或簽完要 `sudo podman exec ncb-nginx nginx -s reload`，或重跑 `apply`。nginx 自己的 reload 迴圈每 168 小時才跑一次。
 
-`quay` 第一位 superuser 要自己建：等 `GET /health/instance` 回 200 後，`POST /api/v1/user/initialize`，JSON 帶 `username`（要等於 `config.yaml` 的 `SUPER_USERS`，範本是 `quay`）、`password`、`email`。使用者表不再是空的之後，這支 API 就關閉。另外兩件事：`SERVER_HOSTNAME` 是 `quay.local` 不帶埠，podman 軌的 hostPort 是 8080，用 `<主機>:8080` push 時 token 的 realm 會指向 `quay.local` 的 80 埠，要前面有 80 埠的反向代理且名稱解析得到；以 `.example` 補位上線時，`config.yaml` 裡的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 是字面值 `${SECRET_KEY}`，建庫後再換會讓既有的 token 與 robot 帳號失效，所以要在第一次 `apply` 前填好。
+`quay` 的存取政策寫在 `config.yaml`：只有 superuser 能建帳號、public repo 免登入可拉、登入用資料庫帳密。第一位 superuser 要自己建，另有兩件事要在第一次 `apply` 前知道：
 
-`grafana` 沒設 `GF_SECURITY_ADMIN_*`，第一次登入用上游預設的 `admin`／`admin`，登入後會被要求改密碼。podman 軌一 `apply` 3000 埠就對網段開放，apply 完立刻登入改掉。
+- 等 `GET /health/instance` 回 200 後，`POST /api/v1/user/initialize`，JSON 帶 `username`（要等於 `config.yaml` 的 `SUPER_USERS`，範本是 `quay`）、`password`、`email`。Quay 文件寫這支 API 只在使用者表為空時開放。
+- `SERVER_HOSTNAME` 是 `quay.local` 不帶埠，podman 軌的 hostPort 是 8080。用 `<主機>:8080` push 時，token 的 realm 會指向 `quay.local` 的 80 埠。
+- 以 `.example` 補位上線時，`config.yaml` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 是字面值 `${SECRET_KEY}`。建庫後再換會讓既有的 token 失效，所以要先填好。
+
+`grafana` 沒設 `GF_SECURITY_ADMIN_*`，第一次登入用上游預設的 `admin`／`admin`。podman 軌一 `apply` 3000 埠就對網段開放，apply 完立刻登入改掉。
 
 ### 實驗室的連線方式
 
 `litellm`、`openwebui` 的 podman 軌綁主機的所有介面，實驗室網段的其他主機都連得到。網頁開 `http://<主機位址>:8080`，agent 連 `http://<主機位址>:4000`，實驗室主機是 172.20.1.192。
 
-- 連線是 HTTP 明文，主機沒有另設防火牆。其他有 hostPort 的服務（gmm 8080、grafana 3000、quay 8080、ncb 80 與 443、minio 9000 與 9001）同樣綁全部介面、同樣明文。
+- 連線是 HTTP 明文，主機沒有另設防火牆。其他有 hostPort 的服務同樣綁全部介面、同樣明文，埠見服務一覽表。
 - OpenWebUI 開放註冊，新帳號要 admin 核准才能聊天。
 - `vllm` 不開 hostPort，`litellm` 經 pod 網路用 `vllm-pod` 連進來。podman 的 kube 網路沒有隔離，同網路的 pod 與主機本身都連得到 `vllm`；從主機的對外位址連不到。
 
@@ -151,7 +155,7 @@ task image:check SVC=<svc>   # 渲染產物的每個 image 都解析成完整參
 - `StatefulSet` 的 `volumeClaimTemplates` PVC 由 k8s 動態建立，不在 manifest 內，所以不隨 `delete` 移除。腳本會列出這些 PVC，並印出手動清除的指令。
 - `delete` 不動 `services/<svc>/secret/` 的真值檔與 sync 工具的本機檔，拆掉再 `apply` 用同一份。
 - 要從 podman 具名卷取檔（例如 gmm 的錄影、ncb 的憑證），用 `sudo podman volume inspect <卷名>` 找 mountpoint，備份用 `sudo podman volume export <卷名>`。卷名就是 manifest 的 `claimName`。
-- 要拆 pod 但留卷，`task` 沒有這個動詞。手動 `kubectl kustomize services/<svc>/podman | sudo podman kube down -`（不帶 `--force`）會留下卷，還沒實測。
+- 要拆 pod 但留卷，`task` 沒有這個動詞。手動做法還沒驗過，列在 [docs/PROGRESS.md](docs/PROGRESS.md)。
 
 要暫停但保留資料時，本介面不提供 `stop`，理由見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈設計取捨〉。改用原生工具：
 
