@@ -1,0 +1,314 @@
+#!/bin/bash
+# 驅動: git pre-push（自動；由帳號層派工 hook 或本 repo 的 core.hooksPath 呼叫）
+# pre-push — 四道防護規則（guardrail）：機密掃描（gitleaks）、forbidden 掃描、四大文件檢查、Taskfile 檢查
+#
+# 註記：逐項容錯，捨棄 -e；一道未過不中斷其餘各道，讓使用者一次看到全部問題
+set -uo pipefail
+
+# 本檔原樣複製在每個 repo 的 .githooks/。
+# 接法：由帳號層派工 hook 或本 repo 的 core.hooksPath 呼叫。
+# 規則檔與檢查腳本只取自被推 repo 的主工作樹（top），不看本檔放在哪裡，也不讀工作區根。
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}" || exit 1
+# 主工作樹：從 linked worktree 推送時，show-toplevel 是 worktree 路徑，規則仍取自主工作樹那一份。
+# 取實體路徑（pwd -P），訊息裡的 repo 目錄名不受符號連結影響。
+common="$(git rev-parse --git-common-dir)" || { echo "Error: 無法定位主工作樹，掃描無法執行" >&2; exit 1; }
+top="$(cd "${common}/.." && pwd -P)" || { echo "Error: 無法定位主工作樹，掃描無法執行" >&2; exit 1; }
+
+# 自身排除：forbidden 規則檔以字面持有一批禁字樣本，被自己的掃描讀到必然命中，只能排除。
+# 排除範圍刻意只到這個檔，不及於整個目錄——同目錄的腳本仍要留在兩道掃描的射程內；
+# 機密掃描不另加排除（只剩 gitleaks 內建的路徑允許清單），金鑰誤寫進 pre-push 一樣擋。
+# 判準看「受掃的樹裡有沒有這個目錄」而非「hook 從哪裡執行」：linked worktree 裡有一份
+# .githooks/ 複本，而規則檔是從主工作樹讀的，用執行位置去判會漏掉那份複本。
+forbid_self=()
+if [[ -d .githooks ]]; then
+  forbid_self=(":(exclude).githooks/forbidden-patterns.txt")
+fi
+
+# pre-push $1＝本次推送的目標 remote 名（直推 URL 時是該 URL）；決定排除「哪個 remote 已有」的 commit。
+# git 一律會傳；缺它只可能是手動誤跑，直接擋，不退回全掃的特例分支。
+remote_name="${1:?usage: pre-push <remote> [url]（由 git push 呼叫；手動跑要用 stdin 餵「<local ref> <local sha> <remote ref> <remote sha>」各一行，不餵 stdin 會得到假綠燈）}"
+gitleaks_conf="${top}/.githooks/gitleaks.toml"
+forbid_pats="${top}/.githooks/forbidden-patterns.txt"
+# 四大文件與 Taskfile 檢查的腳本也在主工作樹；該 repo 沒有就略過那一道（scan_docs、scan_taskfile 印 Info）。
+check_docs="${top}/bin/check-docs.py"
+check_taskfile="${top}/bin/check-taskfile.py"
+
+GITLEAKS_MIN='8.19.0'
+ZERO='0000000000000000000000000000000000000000'
+fail=0
+
+# gitleaks 缺席或版本太舊一律擋下：少跑一道而沒人知道，等於機密掃描靜默失效。
+# 8.19 起才有 git 子命令，更舊的版本跑不了下面的指令。
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "Error: 找不到 gitleaks，機密掃描無法執行" >&2
+  echo "  安裝 gitleaks ${GITLEAKS_MIN} 以上：從 GitHub release 下載、驗 checksum、放進 ~/.local/bin" >&2
+  exit 1
+fi
+gitleaks_ver="$(gitleaks version 2>/dev/null)"
+gitleaks_ver="${gitleaks_ver#v}"
+if [[ ! "${gitleaks_ver}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || [[ "$(printf '%s\n' "${GITLEAKS_MIN}" "${gitleaks_ver}" | sort -V | head -1)" != "${GITLEAKS_MIN}" ]]; then
+  echo "Error: gitleaks 版本 ${gitleaks_ver:-不明} 低於 ${GITLEAKS_MIN}（缺 git 子命令），機密掃描無法執行" >&2
+  exit 1
+fi
+
+# 規則檔缺席一律擋下。舊版對 forbidden 是「缺檔就整段跳過」，那等於在沒人知道的情況下
+# 少跑一道；實際發生過兩個 repo 只剩機密掃描一道卻毫無訊息的情形。
+[[ -f "${forbid_pats}" ]] || { echo "Error: 缺 ${forbid_pats}，forbidden 掃描無法執行" >&2; exit 1; }
+
+# 機密掃描不接受逐 repo 的例外。gitleaks 會讀受掃 repo 根目錄的 .gitleaksignore（沒被追蹤也有效），
+# 列在裡面的指紋一律放行，而且 --gitleaks-ignore-path 關不掉這一份（8.30.1 實測），只能拒推。
+if [[ -e "${repo_root}/.gitleaksignore" ]]; then
+  echo "Error: ${repo_root}/.gitleaksignore 存在，機密掃描不接受逐 repo 的例外，移除後再推" >&2
+  exit 1
+fi
+
+# SCAN_DIR 放整理過的規則檔、git log 輸出、gitleaks 報告與 grep 結果；存全域是為了讓 EXIT trap 看得到
+SCAN_DIR="$(mktemp -d)" || { echo "Error: 無法建立暫存目錄，掃描無法執行" >&2; exit 1; }
+trap 'rm -rf "${SCAN_DIR}"' EXIT
+
+# gitleaks.toml 缺席時退回內建規則，但仍要明傳 --config：不傳時 gitleaks 改讀受掃 repo 的
+# .gitleaks.toml，repo 自己就能換掉整套規則（8.30.1 實測）
+if [[ ! -f "${gitleaks_conf}" ]]; then
+  gitleaks_conf="${SCAN_DIR}/gitleaks-default.toml"
+  printf '[extend]\nuseDefault = true\n' >"${gitleaks_conf}" \
+    || { echo "Error: 無法寫入 ${gitleaks_conf}，機密掃描無法執行" >&2; exit 1; }
+fi
+
+# 規則檔先整理成「一行一條 pattern」：剝 CRLF（防規則檔 CRLF 化 → grep 靜默失配）、
+# 去註解與空行（註解裡可能有不成對的 [，直接餵 grep 會被當成 regex）。
+# 再整檔試編譯一次：regex 壞掉時 grep 回 2，舊版被 || true 吞掉，整道變成永遠乾淨。
+# 空輸入下可編譯的規則檔必回 1（無命中）。整理後的檔名與原檔相同，訊息照舊指得到是哪一份。
+sed -e 's/\r$//' -e '/^#/d' -e '/^$/d' "${forbid_pats}" >"${SCAN_DIR}/${forbid_pats##*/}" \
+  || { echo "Error: 無法讀取 ${forbid_pats}，掃描無法執行" >&2; exit 1; }
+grc=0
+grep -E -f "${SCAN_DIR}/${forbid_pats##*/}" </dev/null >/dev/null || grc=$?
+if [[ "${grc}" -ne 1 ]]; then
+  echo "Error: ${forbid_pats} 含無法編譯的 regex（見上方 grep 訊息），掃描無法執行" >&2
+  exit 1
+fi
+forbid_pats="${SCAN_DIR}/${forbid_pats##*/}"
+
+# gitleaks 報告只列 commit 短 sha、檔名、規則 id；--redact 之外再不輸出命中行，免得機密再進終端與 log
+printf '%s\n' '{{- range . }}  {{ printf "%.7s" .Commit }} {{ .File }}（{{ .RuleID }}）' '{{ end -}}' \
+  >"${SCAN_DIR}/gitleaks.tmpl"
+
+# 機密掃描：scan_secrets <range...>；命中或無法掃描回 1，乾淨回 0
+scan_secrets() {
+  local log_opts gl_rc
+  # 先驗 range：gitleaks 8.30.1 遇到 git log 失敗只記一筆 ERR，結束碼仍是 0（2026-09-25 實測）
+  if ! git rev-list --quiet "$@" --; then
+    echo "Error: git rev-list 失敗（機密掃描，range: $*），無法確認推送內容" >&2
+    return 1
+  fi
+  # gitleaks 把 --log-opts 以空白切成多個 token 交給 git log；range 各元素都不含空白
+  # （sha、--not、--remotes=<已設定的 remote 名>），直接以空白串接。
+  # -m：merge commit 也出 diff，否則 merge 時才加進去的內容不會被掃。
+  # --text：二進位檔與 .gitattributes 設 -diff 的檔也出 diff，否則整個檔只剩「Binary files differ」。
+  # --no-color：color.ui=always 會讓 gitleaks 解析不了 diff 而靜默放行（2026-09-25 實測）。
+  # --no-textconv、--no-ext-diff：掃的是被推上去的原始 blob，不是本機設定轉換過的樣子。
+  log_opts="$* -m --text --no-color --no-textconv --no-ext-diff"
+  # 誤擋的唯一例外是行尾的 gitleaks:allow 註解：寫在被擋的那一行，diff 看得到放行了什麼。
+  # --gitleaks-ignore-path 指向沒有 .gitleaksignore 的 SCAN_DIR，不讀 cwd 那份（repo 根那份上面已拒推）。
+  local gl_cmd=(gitleaks git --no-banner --redact --log-level error
+    --gitleaks-ignore-path "${SCAN_DIR}" --config "${gitleaks_conf}"
+    --report-format template --report-template "${SCAN_DIR}/gitleaks.tmpl"
+    --report-path "${SCAN_DIR}/gitleaks-report" "--log-opts=${log_opts}")
+  rm -f "${SCAN_DIR}/gitleaks-report"
+  gl_rc=0
+  # 清掉 gitleaks 的設定環境變數：規則只認 --config 或內建，不讓外部環境換掉
+  env -u GITLEAKS_CONFIG -u GITLEAKS_CONFIG_TOML "${gl_cmd[@]}" "${repo_root}" \
+    2>"${SCAN_DIR}/gitleaks.log" || gl_rc=$?
+
+  # 結束碼 1 同時代表「命中」與「致命錯誤」（設定檔讀不到、路徑不存在），要看報告才分得出來。
+  # 結束碼 0 但有 ERR 記錄也算錯誤：git log 的錯誤只寫進 log，不影響結束碼。
+  if [[ "${gl_rc}" -eq 0 && ! -s "${SCAN_DIR}/gitleaks.log" ]]; then
+    return 0
+  fi
+  if [[ "${gl_rc}" -eq 1 && -s "${SCAN_DIR}/gitleaks-report" ]]; then
+    echo "Error: gitleaks 命中機密（range: $*）" >&2
+    # -m 讓 merge 對每個 parent 各出一份 diff，同一筆會重複，只留第一次
+    awk '!seen[$0]++' "${SCAN_DIR}/gitleaks-report" | head -10 >&2
+    return 1
+  fi
+  echo "Error: gitleaks 執行失敗（結束碼 ${gl_rc}，range: $*），無法確認推送內容" >&2
+  # gitleaks 的記錄帶 ANSI 顏色，轉印前剝掉
+  sed 's/\x1b\[[0-9;]*m//g' "${SCAN_DIR}/gitleaks.log" | head -10 >&2
+  return 1
+}
+
+# forbidden 掃描：scan_range <pattern檔> <range...> -- <排除pathspec...>；命中或無法掃描回 1，乾淨回 0
+# range 是多個 token（如 `<sha> --not --remotes=origin`），以 -- 為界逐一傳入，不靠字串分詞。
+scan_range() {
+  local patterns log_file hit_file
+  patterns="$1"
+  shift
+  local range_args=()
+  while [[ "$#" -gt 0 && "$1" != '--' ]]; do
+    range_args+=("$1")
+    shift
+  done
+  shift
+  log_file="${SCAN_DIR}/log"
+  hit_file="${SCAN_DIR}/hits"
+
+  # git log 失敗（bad revision、bad object）時輸出不完整，當成乾淨就是靜默放行，一律擋
+  # --format 讓每個 commit 以「commit <短 sha>」開頭，供下方回推命中位置
+  if ! git log -p -m --no-color --format='commit %h' "${range_args[@]}" -- . "$@" >"${log_file}"; then
+    echo "Error: git log 失敗（${patterns##*/}，range: ${range_args[*]}），無法確認推送內容" >&2
+    return 1
+  fi
+
+  local pat grc locs rc
+  rc=0
+  # patterns 已在啟動時整理過（無 CRLF、無註解與空行），逐行即逐條
+  while IFS= read -r pat || [[ -n "${pat}" ]]; do
+    # -a：內容含非 UTF-8 位元組時 grep 會改印「Binary file matches」而沒有行號，強制當文字
+    grc=0
+    grep -a -n -E -e "${pat}" "${log_file}" >"${hit_file}" || grc=$?
+    case "${grc}" in
+      0) ;;
+      1) continue ;;
+      *)
+        echo "Error: grep 無法執行 pattern（${patterns##*/}）：${pat}" >&2
+        rc=1
+        continue
+        ;;
+    esac
+    # 只算 hunk 內的新增行；diff 檔頭（+++ 行等）命中不算——路徑本身含 pattern 而內容乾淨曾被誤擋。
+    # 不印命中行原文，只印 commit 短 sha 與檔名。
+    if ! locs="$(awk -v hits="${hit_file}" '
+      BEGIN { while ((getline line < hits) > 0) { split(line, f, ":"); want[f[1]] = 1 } }
+      /^commit / { sha = $2; in_hdr = 1; next }
+      /^diff --git / { in_hdr = 1; file = ""; next }
+      in_hdr && /^\+\+\+ / { file = substr($0, 5); sub(/^b\//, "", file); next }
+      in_hdr && /^@@/ { in_hdr = 0; next }
+      !in_hdr && (NR in want) && /^\+/ { key = sha " " file; if (!(key in seen)) { seen[key] = 1; print "  " key } }
+    ' "${log_file}")"; then
+      echo "Error: 無法定位命中位置（${patterns##*/}）：${pat}" >&2
+      rc=1
+      continue
+    fi
+    if [[ -n "${locs}" ]]; then
+      echo "Error: pattern hit (${patterns##*/}): ${pat}" >&2
+      printf '%s\n' "${locs}" | head -10 >&2
+      rc=1
+    fi
+  done <"${patterns}"
+  return "${rc}"
+}
+
+# 展開被推的 commit：expand_tree <sha>；印出暫存目錄路徑，失敗回 1。
+# 檢查的是被推的 commit，不是工作樹：用 git archive 把那個 commit 展開到暫存目錄。
+# 同一個 sha 只展開一次。呼叫端用 $( ) 接路徑，子 shell 改不了變數，所以用「目錄在不在」當快取：
+# 先展開到 .part 再改名，展開到一半失敗的目錄不會被下一次當成已展開。
+expand_tree() {
+  local sha tree
+  sha="$1"
+  tree="${SCAN_DIR}/tree-${sha}"
+  if [[ ! -d "${tree}" ]]; then
+    rm -rf "${tree}.part"
+    if ! mkdir -p "${tree}.part" || ! git archive --format=tar "${sha}" | tar -x -C "${tree}.part" \
+      || ! mv "${tree}.part" "${tree}"; then
+      rm -rf "${tree}.part"
+      return 1
+    fi
+  fi
+  printf '%s\n' "${tree}"
+}
+
+# 四大文件檢查：scan_docs <sha>；不合格或無法檢查回 1，合格或該 repo 沒有 check-docs.py 回 0。
+# check-docs.py 用被推 repo 主工作樹的那一份，必要節清單內嵌在腳本裡。python3 由呼叫端先確認，與 Taskfile 檢查共用一次。
+scan_docs() {
+  local sha tree out
+  sha="$1"
+  if [[ ! -f "${check_docs}" ]]; then
+    echo "Info: 找不到 ${check_docs}，略過四大文件檢查"
+    return 0
+  fi
+  if ! tree="$(expand_tree "${sha}")"; then
+    echo "Error: 無法展開 ${sha:0:7}，四大文件檢查無法執行" >&2
+    return 1
+  fi
+  # check-docs.py 的 Success 走 stdout，丟掉；錯誤明細走 stderr，接住後轉印
+  if ! out="$(python3 "${check_docs}" "${tree}" 2>&1 >/dev/null)"; then
+    echo "Error: 四大文件檢查未過（$(basename "${top}") ${sha:0:7}），本機可跑 bin/check-docs.py 查同一批問題" >&2
+    # 首行寫的是暫存目錄路徑，對使用者沒有意義，拿掉
+    printf '%s\n' "${out}" | grep -vF -e "Error: ${tree} " | head -20 >&2
+    return 1
+  fi
+  return 0
+}
+
+# Taskfile 檢查：scan_taskfile <sha>；不合格或無法檢查回 1，合格、還沒套用分類原則或該 repo 沒有 check-taskfile.py 回 0。
+# 結構照 scan_docs：check-taskfile.py 用被推 repo 主工作樹的那一份，python3 由呼叫端先確認。
+# 還沒套用的 repo 由 check-taskfile.py 自己判斷並回 0；它的 Info 與 Success 都走 stdout，一起丟掉。
+scan_taskfile() {
+  local sha tree out
+  sha="$1"
+  if [[ ! -f "${check_taskfile}" ]]; then
+    echo "Info: 找不到 ${check_taskfile}，略過 Taskfile 檢查"
+    return 0
+  fi
+  if ! tree="$(expand_tree "${sha}")"; then
+    echo "Error: 無法展開 ${sha:0:7}，Taskfile 檢查無法執行" >&2
+    return 1
+  fi
+  if ! out="$(python3 "${check_taskfile}" "${tree}" 2>&1 >/dev/null)"; then
+    echo "Error: Taskfile 檢查未過（$(basename "${top}") ${sha:0:7}），本機可跑 bin/check-taskfile.py 查同一批問題" >&2
+    # 首行寫的是暫存目錄路徑，對使用者沒有意義，拿掉
+    printf '%s\n' "${out}" | grep -vF -e "Error: ${tree} " | head -20 >&2
+    return 1
+  fi
+  return 0
+}
+
+# main
+# 已設定的 remote 清單，供下方判斷 $1 是 remote 名還是直推的 URL
+remotes="$(git remote)"
+while read -r _ local_sha remote_ref remote_sha; do
+  # 刪除遠端 ref
+  [[ "${local_sha}" == "${ZERO}" ]] && continue
+  if [[ "${remote_sha}" == "${ZERO}" ]]; then
+    # 新 ref（新 tag／新分支）：只掃「尚未在『本次目標 remote』上」的 commit，不重掃該 remote 已有、
+    # 已驗過的歷史。指向已推到本 remote 之 commit 的 tag → 無新 commit → 不掃 → 不自擋（發版 tag 不再
+    # 翻出歷史裡的負面測試假 token）。**必須限定目標 remote**——多 remote 下 commit 已在 A remote 不代表
+    # 已在要推的 B remote，仍須掃以防密碼新抵達 B（用 --remotes 全部會漏）。pre-push 管「防新洩漏」、
+    # 歷史偵測歸手動跑 gitleaks git 全段掃描。
+    # 直推 URL（$1 不是已設定的 remote）時沒有 refs/remotes/<URL>/* 可排除 → 全掃 fail-closed。
+    # 這個判斷也讓 range 只含 remote 名而不含 URL：gitleaks 的 --log-opts 以空白分詞，URL 可能含空白。
+    if grep -qxF -e "${remote_name}" <<<"${remotes}"; then
+      range=("${local_sha}" --not "--remotes=${remote_name}")
+    else
+      range=("${local_sha}")
+    fi
+  elif ! git rev-parse --quiet --verify "${remote_sha}^{commit}" >/dev/null; then
+    # stale clone／force push：fail-closed 掃全段
+    range=("${local_sha}")
+  else
+    range=("${remote_sha}..${local_sha}")
+  fi
+  scan_secrets "${range[@]}" || fail=1
+  # *.md 與 docs/ 要能寫上游原文與歷史連結，forbidden 面不掃；機密面不在此列
+  scan_range "${forbid_pats}" "${range[@]}" -- \
+    ':(exclude,glob)**/*.md' ':(exclude,glob)**/docs/**' \
+    ${forbid_self[@]+"${forbid_self[@]}"} || fail=1
+  # 四大文件與 Taskfile 只檢查分支：tag 指向的 commit，推分支時已經檢查過；舊 commit 補打 tag 也不該被新規則擋下
+  if [[ "${remote_ref}" == refs/heads/* ]]; then
+    # 兩道都靠 python3：缺它時只印一次，兩道一起算未過；兩支腳本都不存在時用不到它
+    if { [[ -f "${check_docs}" ]] || [[ -f "${check_taskfile}" ]]; } && ! command -v python3 >/dev/null 2>&1; then
+      echo "Error: 找不到 python3，四大文件與 Taskfile 檢查無法執行" >&2
+      fail=1
+    else
+      scan_docs "${local_sha}" || fail=1
+      scan_taskfile "${local_sha}" || fail=1
+    fi
+  fi
+done
+
+if [[ "${fail}" -ne 0 ]]; then
+  echo '' >&2
+  echo 'Error: Push 已阻擋：機密 / 禁用引用 / 四大文件 / Taskfile 其一未過（見上方 Error: 輸出）。' >&2
+fi
+exit "${fail}"

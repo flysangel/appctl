@@ -1,0 +1,78 @@
+# gitleaks.toml — 工作區共用的 gitleaks 設定：內建規則之外，補本 homelab 會出現而內建規則漏掉的樣式
+#
+# 內建規則已抓得到的樣式不在此重寫：PEM 私鑰、kubeconfig 的 client-key-data（內建規則解 base64 後
+# 由 private-key 命中）、GitHub／GitLab／AWS token、高熵的密碼與 Ceph key（generic-api-key）。
+# 以下各條補的是內建規則的兩個缺口：
+#   1. generic-api-key 以熵值門檻過濾，人選的低熵密碼（字典字加數字）會漏。
+#   2. 沒有專屬規則、又不帶 generic-api-key 關鍵字的格式（Proxmox API token、Quay robot 帳密）。
+# 規則刻意收窄：值以佔位符開頭（< $ @ {）、以路徑開頭（/ . ~）或短於 8 字元都不命中，
+# 對應各 repo 的 @{KEY} 佔位、${VAR} 參照與檔案路徑寫法。
+# 等號兩側有空白（Python、HCL 的寫法）時值必須帶引號：不帶引號的右值是程式碼，不是字面值。
+# 實測版本：gitleaks 8.30.1（2026-09-25）。
+
+[extend]
+useDefault = true
+
+# Proxmox API token：USER@REALM!TOKENID=<UUID>，header（PVEAPIToken=…）與 .env 兩種寫法都是這個形狀。
+# UUID 熵值低於 generic-api-key 門檻，且 header 形式不帶關鍵字，內建規則兩種都漏。
+[[rules]]
+id = "homelab-proxmox-api-token"
+description = "Proxmox API token（USER@REALM!TOKENID=UUID）"
+regex = '''[A-Za-z0-9._-]+@[A-Za-z0-9._-]+![A-Za-z0-9._-]+=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b'''
+secretGroup = 1
+
+# 環境變數形式：大寫鍵名以 PASSWORD／PASSWD／TOKEN／SECRET／API_KEY 結尾，賦值（= 或 YAML 的 :）一個字面值。
+# 涵蓋 .env、shell 的 export、docker compose 的 environment。鍵名要以關鍵字「結尾」，
+# PASSWORD_FILE、TOKEN_TTL 這類指向路徑或設定的鍵不命中。
+[[rules]]
+id = "homelab-env-credential"
+description = "大寫環境變數賦值的明文密碼或 token"
+regex = '''(?m)\b[A-Z0-9_]*(?:PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|APIKEY)(?:=['"]?|[ \t]+=[ \t]*['"]|[ \t]*=[ \t]+['"]|:[ \t]+['"]?)([^\s'"<>$@{}()\[\]`\\#;|&/.~!*][^\s'"<>$@{}()\[\]`\\#;|&]{7,})['"]?(?:[\s'"<>$@{}`\\#;|&,)\]]|$)'''
+secretGroup = 1
+keywords = ["password", "passwd", "token", "secret", "api_key", "apikey"]
+
+[[rules.allowlists]]
+description = "明顯的佔位值"
+stopwords = ["changeme", "change_me", "placeholder", "example", "xxxxxxxx", "redacted", "replace_me", "dummy", "fake"]
+
+# 值以冒號開頭的不算（例如 mimikatz 的 token::elevate，2026-09-26 實測誤判）。
+# 設定檔形式：小寫鍵名為 password／passwd／secret／token／api_key，或以「_關鍵字」結尾（db_password、
+# pm_api_token_secret），賦值一個字面值。大小寫敏感：existingSecret、secretName、tokenPath 這類
+# k8s 與 Helm 欄位名不命中。只允許同一行的空白，避免 `secret:` 下一行的巢狀鍵被當成值。
+[[rules]]
+id = "homelab-config-credential"
+description = "設定檔小寫鍵的明文密碼或 token"
+regex = '''(?m)(?:^|[\s{,"'])(?:[a-z0-9_]*_)?(?:password|passwd|secret|token|api_key|apikey)["']?(?:=['"]?|[ \t]+=[ \t]*['"]|[ \t]*=[ \t]+['"]|[ \t]*:[ \t]*['"]?)([^\s'"<>$@{}()\[\]`\\#;|&/.~!*:][^\s'"<>$@{}()\[\]`\\#;|&]{7,})['"]?(?:[\s'"<>$@{}`\\#;|&,)\]]|$)'''
+secretGroup = 1
+keywords = ["password", "passwd", "secret", "token", "api_key", "apikey"]
+
+[[rules.allowlists]]
+description = "明顯的佔位值"
+stopwords = ["changeme", "change_me", "placeholder", "example", "xxxxxxxx", "redacted", "replace_me", "dummy", "fake"]
+
+[[rules.allowlists]]
+description = "參照而非字面值：LiteLLM 的 os.environ/<VAR>、app-services manifest 的 secret: <ENV_KEY>"
+regexes = ['''^os\.environ/''', '''^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$''']
+
+# URL 內嵌帳密：scheme://user:password@host。git clone 帶 GitLab deploy token（舊格式沒有 gldt- 前綴）
+# 就是這個形狀，images 的 CronJob 曾經這樣寫。內建規則不認得這個格式（2026-09-25 實測）。
+# 密碼以佔位符開頭（< $ @ {）時不命中，對應 ${VAR} 與 @{KEY} 的寫法。
+[[rules]]
+id = "homelab-url-credential"
+description = "URL 內嵌的明文帳密（scheme://user:password@host）"
+regex = '''[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@'"]*:([^\s:/@'"<>$@{}]{8,})@[A-Za-z0-9._-]+'''
+secretGroup = 1
+keywords = ["://"]
+
+[[rules.allowlists]]
+description = "文件裡的佔位寫法：USERNAME:PASSWORD@IP、user:password@host"
+regexes = ['''^[A-Z][A-Z0-9_]*$''', '''^(?:password|passwd|secret)$''']
+stopwords = ["changeme", "change_me", "placeholder", "example", "xxxxxxxx", "redacted", "replace_me", "dummy", "fake"]
+
+# Quay robot 帳密：<namespace>+<robot>:<token>，出現在 docker login 的 auth 字串。
+# 不帶關鍵字，內建規則不認得這個格式。
+[[rules]]
+id = "homelab-quay-robot"
+description = "Quay robot 帳號與 token（namespace+robot:TOKEN）"
+regex = '''\b[a-z0-9_]+\+[a-z0-9_]+:([A-Z0-9]{32,})\b'''
+secretGroup = 1

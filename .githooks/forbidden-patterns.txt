@@ -1,0 +1,11 @@
+# 防護規則（guardrail；ERE 語法）：*.md 與 docs/** 之外禁止
+# 浮動參照（floating ref）（帶尾斜線：實際消費 URL 恆為 raw/<ref>/<path>；不帶尾斜線會誤中文件註解的既有歷史）
+# 註：blacklist（黑名單）為最佳努力，只列常見浮動分支 ref。版本釘選（pin）正解為 raw/vX.Y.Z/，主防線是「不寫死浮動 ref」。
+raw/main/
+raw/master/
+raw/develop/
+raw/dev/
+raw/HEAD/
+# 字面 registry 主機：只擋 Docker Hub——匿名拉取有次數上限，應由 mirror 提供映像。
+# 其餘上游（quay／ghcr／registry.k8s.io 等）無 mirror 時直拉為常態，來源正確性由各 repo 自己的對帳 task 驗，不列黑名單。
+docker\.io/
