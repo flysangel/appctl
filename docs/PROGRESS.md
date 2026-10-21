@@ -12,8 +12,8 @@
 ## 2. 進行中
 
 - 這個分支做什麼：harness-adopt，把 app-services 改成 `~/.claude/rules/harness.md` 的新契約。
-- 做到哪：第 5 步，改寫 PROGRESS。
-- 下一步：第 6 步，補 `task doctor` 與 `task lint`。
+- 做到哪：第 6 步，補了 `task doctor` 與 `task lint`。
+- 下一步：第 7 步，從範本 repo 換掉 `.githooks/` 與兩支檢查副本。
 
 ## 3. 待辦
 

@@ -8,6 +8,19 @@ tasks:
       - task --list-all
     silent: true
 
+  doctor:
+    desc: 檢查執行環境：命令存在與種類、core.hooksPath 來源，不安裝
+    cmds:
+      - bash bin/doctor.sh
+
+  lint:
+    desc: 離線靜態檢查：四大文件、Taskfile、shellcheck
+    cmds:
+      - python3 bin/check-docs.py
+      - python3 bin/check-taskfile.py
+      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh services/gmm/sync.sh services/openwebui/sync.sh services/vllm/sync.sh
+      - shellcheck -S warning .githooks/pre-push
+
   test:
     desc: 單元測試，離線；涵蓋兩動詞腳本、零漂移比對器、litellm 設定入庫
     cmds:
