@@ -12,9 +12,9 @@
 - quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`task apply` 回來時 quay 還沒就緒
 - grafana 的 admin 密碼納入 `secret/secret.env`（`GF_SECURITY_ADMIN_PASSWORD`），不再用上游預設 admin/admin。做完改 `README.md`〈上手〉grafana 那段
 - 決定 ncb 的 certbot 容器去留：`server_name` 是 `ncb.local`，ACME 不簽，手放的憑證沒有 renewal 設定檔，`renew` 迴圈等於沒做事。拿掉容器，或改成公網網域（公網 DNS 不在本 repo 範圍）。做完改 `docs/ARCHITECTURE.md`〈已知的結構性限制〉ncb 那條與 `README.md`〈上手〉
-- 把 `AGENTS.md`〈改完要驗〉的手動煙測清單寫成 podman 軌腳本（apply → 等 Running → 探測 → 登入 → 再 apply → delete → 確認 pod 與卷不在），一個服務失敗記錄後繼續跑下一個，結尾才決定退出碼；比照 `task litellm:check` 放進 Taskfile。做完改 `AGENTS.md`〈改完要驗〉那段
+- 把 `AGENTS.md`〈真環境煙測要逐條手動跑〉的手動煙測清單寫成 podman 軌腳本（apply → 等 Running → 探測 → 登入 → 再 apply → delete → 確認 pod 與卷不在），一個服務失敗記錄後繼續跑下一個，結尾才決定退出碼；比照 `task litellm:check` 放進 Taskfile。做完改 `AGENTS.md`〈真環境煙測要逐條手動跑〉
 - `task test` 改成每支測試檔都要印 `ALL <n> PASS`，沒印就算失敗。現在漏寫 `__main__` 的測試檔零輸出、回 0，`task test` 會把它當成通過
-- `Taskfile.yaml` 的 `test` 改成自動收 `tests/test_*.py`，不逐行列檔。做完連同上一條，刪 `AGENTS.md`〈改完要驗〉講 `task test` 的那段
+- `Taskfile.yaml` 的 `test` 改成自動收 `tests/test_*.py`，不逐行列檔。做完連同上一條，刪 `AGENTS.md`〈`task test` 回 0 不等於每支都跑了〉
 - 安裝 `yamllint`，對全部 `kustomization.yaml` 跑一次語法檢查
 - 做 `vllm` 的 k8s 軌：拆成一個 pod 一個容器，並打通聊天。k8s overlay 要改寫 litellm `config.yaml` 的 `api_base`（現在寫 podman 名，k8s 軌的本地別名連不到）
 

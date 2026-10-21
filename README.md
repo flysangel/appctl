@@ -104,7 +104,7 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 
 ## 3. 常用操作
 
-`task --list-all` 列出全部 task。改完要跑哪些檢查，見 [AGENTS.md](AGENTS.md)〈改完要驗〉。
+`task --list-all` 列出全部 task。改完要跑哪些檢查，見 [AGENTS.md](AGENTS.md)〈完成定義〉。
 
 ### 營運同步（`task seed`）
 
@@ -199,7 +199,7 @@ curl -s -X POST http://127.0.0.1:4000/key/block -H "Authorization: Bearer ${LITE
 
 | 文件 | 內容 |
 |---|---|
-| [AGENTS.md](AGENTS.md) | 動手前必讀：地雷、改完要驗、不要做的事 |
+| [AGENTS.md](AGENTS.md) | 開工必讀：地雷、完成定義、不要做的事 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 邊界、目錄結構、部署管線、設計取捨 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 還沒做的待辦 |
 
