@@ -11,7 +11,7 @@
 - 上游：images repo 建好的映像推上 registry 後，版號直接寫進各服務 `base/kustomization.yaml` 的 `images:`。本 repo 不讀 images 的版本清單，也沒有 `versions.conf`。
 - 上游：k8s 軌部署到 infra-k8s 建好的叢集。
 - 叢集級 addon（LB、Ingress、cert-manager 等）在 infra-k8s，不在本 repo。本 repo 只放使用者面的服務。
-- push 護欄不算上游依賴。它不釘版，由工作區根 repo 管理。
+- push 護欄不算上游依賴。它是本 repo 自帶的 `.githooks/` 副本，由帳號層派工 hook 呼叫，不釘版。
 - 不管公網 DNS 與 DDNS。服務只給信任網段用，Ingress 主機名一律 `<svc>.local`，工作區沒有 repo 維護公網名稱。
 
 ## 2. 目錄結構

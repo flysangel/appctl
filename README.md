@@ -51,7 +51,7 @@
 
 k8s 軌另有叢集前置：PVC 與 Ingress 刻意不指定 class，依賴叢集已經標好預設 StorageClass 與預設 IngressClass；`kadm`、`xadm-*` 的 `LoadBalancer` Service 要叢集有 LB 提供者，否則卡在 pending。
 
-本 repo 是工作區的子 repo。push 護欄由工作區根 repo 管理，新機器跑工作區根 repo 的 `bin/bootstrap.sh` 就會接上。
+push 護欄是本 repo 自帶的 `.githooks/pre-push`，由帳號層派工 hook 呼叫。
 
 ## 2. 上手
 
@@ -211,4 +211,4 @@ spec、plan、工單放在 `docs/superpowers/` 與 `docs/tickets/`，只存本�
 |---|---|---|
 | 上游 | images | 映像推上 registry 後，版號直接寫進各服務 `base/kustomization.yaml` 的 `images:` |
 | 上游 | infra-k8s | 提供 k8s 軌部署用的叢集 |
-| 護欄 | 工作區根 repo | push 護欄由工作區根 repo 管理，本 repo 沒有自己的 hook |
+| 護欄 | 帳號層派工 hook | 呼叫本 repo 自帶的 `.githooks/pre-push` |
