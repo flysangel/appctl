@@ -3,19 +3,14 @@
 ## 1. 目前狀態
 
 - 標準驗證路徑：`task doctor` → `task lint` → `task test`。真環境驗證照 `AGENTS.md`〈完成定義〉的 L3，要部署服務。
-- 綠的層：`task lint`、`task test`。
+- 綠的層：`task doctor`、`task lint`、`task test`。
+- 已跑過 harness-adopt，`bin/check-docs.py` 與 `.githooks/` 是範本 repo 的新契約副本。
 - `bin/check-taskfile.py` 目前會略過本 repo，因為 Taskfile〈分類原則〉還沒套用，見〈待辦〉。
 - 已知壞掉：`litellm` 的 k8s 軌連不到地端模型，`vllm` 還沒有 k8s 軌，見〈待辦〉。
 - 未驗證：ncb 的憑證順序、`bin/svc.sh` 對 podman `delete` 的 exit 125 容錯、「拆 pod 留卷」的手動做法，見〈待辦〉。
 - blocker：沒有。
 
-## 2. 進行中
-
-- 這個分支做什麼：harness-adopt，把 app-services 改成 `~/.claude/rules/harness.md` 的新契約。
-- 做到哪：第 8 步，README 改成新版必要節，ARCHITECTURE〈設計取捨〉每條寫出檢查名稱。
-- 下一步：第 9 步，全套驗證，並在拋棄式 clone 跑真的 pre-push。
-
-## 3. 待辦
+## 2. 待辦
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
