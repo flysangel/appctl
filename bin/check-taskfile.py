@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check-taskfile — 驗各 repo 的 Taskfile 符合分類原則（docs/ARCHITECTURE.md〈Taskfile 分類原則〉）。
+"""check-taskfile — 驗各 repo 的 Taskfile 符合分類原則（~/.claude/rules/taskfile.md〈分類原則〉）。
 
 用法：check-taskfile.py                 驗目前所在的 repo（git rev-parse --show-toplevel）
       check-taskfile.py <repo 路徑> [...] 驗指定路徑，例如 worktree
@@ -101,7 +101,7 @@ def find_taskfiles(repo: Path) -> list[Path]:
     """走訪 repo，跳過 . 開頭的目錄與巢狀 git repo，收集 Taskfile.yml 與 Taskfile.yaml（檔名不分大小寫）。"""
     found = []
     for root, dirs, files in os.walk(repo):
-        # 子 repo 放在工作區根目錄底下，但各自是獨立的 repo，要由它自己的檢查負責。
+        # 巢狀的子 repo 是獨立的 repo，要由它自己的檢查負責。
         dirs[:] = [d for d in dirs if not d.startswith(".") and not (Path(root) / d / ".git").exists()]
         found += [Path(root) / f for f in files if f.lower() in TASKFILE_NAMES]
     return sorted(found)

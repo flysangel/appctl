@@ -12,8 +12,8 @@
 ## 2. 進行中
 
 - 這個分支做什麼：harness-adopt，把 app-services 改成 `~/.claude/rules/harness.md` 的新契約。
-- 做到哪：第 6 步，補了 `task doctor` 與 `task lint`。
-- 下一步：第 7 步，從範本 repo 換掉 `.githooks/` 與兩支檢查副本。
+- 做到哪：第 7 步，兩支檢查副本已換成範本 repo 的新契約版。
+- 下一步：第 8 步，README 改新版必要節，ARCHITECTURE〈設計取捨〉補檢查名稱。
 
 ## 3. 待辦
 

@@ -11,12 +11,11 @@
 
 驗以下幾條：
   C1 四份檔都存在
-  C2 README、AGENTS、ARCHITECTURE 的 ## 序列符合必要節的任一套；一套裡的「…」吃掉相鄰必要節之間的任意個 ##；
+  C2 四份檔的 ## 序列符合必要節的任一套；一套裡的「…」吃掉相鄰必要節之間的任意個 ##；
      全部寫成「## N.」從 1 連號
-  C3 PROGRESS 沒有 ## 節，也沒有編號清單
+  C3 PROGRESS 的〈待辦〉沒有編號清單
   C4 「見〈節名〉」「`路徑`〈節名〉」「[文字](路徑)〈節名〉」對得到節標題（## 到 ######，比對前去掉編號）。
-     markdown 連結對文件所在目錄解析，其餘對本 repo 解析。
-     「工作區根 repo 的 `路徑`」指向 repo 外面，驗不了：印 Info 後略過。
+     markdown 連結對文件所在目錄解析；`~/` 開頭的路徑對執行時的 $HOME 解析；其餘對本 repo 解析。
      repo 有 CLAUDE.md 時，也驗它的引用
   C5 沒有行號引用，例如 `foo.sh:12`
   C6 沒有本機絕對路徑：執行時 $HOME 開頭的路徑，加上 repo 主工作樹的路徑。
@@ -38,16 +37,20 @@ REQUIRED: dict[str, list[list[str]]] = {
         # 舊版，過渡期；全部 repo 套用新版後刪掉
         ["前置需求", "上手", "常用操作", "文件導覽"],
     ],
-    "AGENTS.md": [["30 秒定位", "動手前", "地雷", "改完要驗", "不要做的事"]],
+    "AGENTS.md": [["30 秒定位", "開工", "地雷", "完成定義", "不要做的事"]],
     "docs/ARCHITECTURE.md": [["定位與邊界", "目錄結構", "依賴與資料流", "設計取捨", "已知的結構性限制"]],
+    # 〈進行中〉只在分支上寫，merge 回 main 前刪掉
+    "docs/PROGRESS.md": [["目前狀態", "進行中", "待辦"], ["目前狀態", "待辦"]],
 }
+PROGRESS = "docs/PROGRESS.md"
+TODO_SECTION = "待辦"
 FENCE_RE = re.compile(r"^```.*?^```[^\n]*$", re.M | re.S)
 INLINE_RE = re.compile(r"`[^`\n]*`")
 HEADING_RE = re.compile(r"^(#+)\s+(.+?)\s*$", re.M)
 # 編號是「1.」「8.1」「9.2.」；「30 秒定位」的 30 是節名，不是編號
 NUMBER_RE = re.compile(r"^(?:\d+(?:\.\d+)*\.|\d+(?:\.\d+)+)\s+")
 ORDERED_RE = re.compile(r"^\s*\d+\.\s", re.M)
-REF_RE = re.compile(r"(工作區根 repo 的 )?(?:`([^`\n]+)`|本檔|見)〈([^〉\n]+)〉")
+REF_RE = re.compile(r"(?:`([^`\n]+)`|本檔|見)〈([^〉\n]+)〉")
 MD_REF_RE = re.compile(r"\[[^\]\n]*\]\(([^)\s]+)\)〈([^〉\n]+)〉")
 LINE_REF_RE = re.compile(r"[\w./-]+\.(?:md|sh|py|ya?ml|txt|conf|ps1|bat|toml):\d+")
 
@@ -93,13 +96,15 @@ def check_sections(rel: str, text: str, alternatives: list[list[str]]) -> list[s
 
 
 def check_progress(rel: str, text: str) -> list[str]:
-    """C3：PROGRESS 只列待辦，不分節、不編號。"""
-    errors = []
-    if any(level == 2 for level, _ in headings(text)):
-        errors.append(f"C3 {rel}: 不應有 ## 節")
-    if ORDERED_RE.search(strip_fences(text)):
-        errors.append(f"C3 {rel}: 不應有編號清單")
-    return errors
+    """C3：PROGRESS 的〈待辦〉一行一條，不編號。節的序列由 C2 驗。"""
+    body = strip_fences(text)
+    sections = list(re.finditer(r"^##\s+(.+?)\s*$", body, re.M))
+    for i, m in enumerate(sections):
+        if NUMBER_RE.sub("", m.group(1)) == TODO_SECTION:
+            end = sections[i + 1].start() if i + 1 < len(sections) else len(body)
+            if ORDERED_RE.search(body[m.end():end]):
+                return [f"C3 {rel}: 〈{TODO_SECTION}〉不應有編號清單"]
+    return []
 
 
 def is_real_ref(m: re.Match, code_spans: list[tuple[int, int]]) -> bool:
@@ -108,26 +113,30 @@ def is_real_ref(m: re.Match, code_spans: list[tuple[int, int]]) -> bool:
     路徑寫法的引用，開頭的反引號必須正好是一段 inline code 的起點；
     否則是兩段 code 之間的文字被誤配成路徑。
     """
-    path_given = m.group(2) is not None
-    ref_start = m.start(2) - 1 if path_given else m.start()
+    path_given = m.group(1) is not None
+    ref_start = m.start(1) - 1 if path_given else m.start()
     if any(start < ref_start < end for start, end in code_spans):
         return False
     return not path_given or ref_start in {start for start, _ in code_spans}
 
 
 def check_refs(doc: Path, repo: Path) -> list[str]:
-    """C4：引用的檔要存在，節名要對得到該檔的標題。「工作區根 repo 的」引用驗不了，印 Info 後略過。"""
+    """C4：引用的檔要存在，節名要對得到該檔的標題。"""
     rel = doc.relative_to(repo).as_posix()
     text = strip_fences(doc.read_text(encoding="utf-8"))
     code_spans = [m.span() for m in INLINE_RE.finditer(text)]
     refs = []
     for m in REF_RE.finditer(text):
         if is_real_ref(m, code_spans):
-            to_root, path, section = m.groups()
-            if to_root:
-                print(f"Info: {rel}：略過工作區根的引用〈{section}〉")
-                continue
-            refs.append((m.group(0), doc if path is None else repo / path, section))
+            path, section = m.groups()
+            if path is None:
+                target = doc
+            elif path.startswith("~/"):
+                # 帳號層的檔，例如 ~/.claude/rules/harness.md；對執行時的 $HOME 解析
+                target = Path(path).expanduser()
+            else:
+                target = repo / path
+            refs.append((m.group(0), target, section))
     # markdown 連結的路徑相對於文件自己的目錄，例如 docs/ 底下寫 ../AGENTS.md
     for m in MD_REF_RE.finditer(text):
         if not any(start < m.start() < end for start, end in code_spans):
@@ -161,7 +170,7 @@ def leak_roots(repo: Path) -> set[str]:
 
 
 def check_leaks(rel: str, text: str, roots: set[str]) -> list[str]:
-    """C5、C6：不寫行號，不寫工作區根的本機絕對路徑。"""
+    """C5、C6：不寫行號，不寫本機絕對路徑。"""
     errors = [f"C5 {rel}: 行號引用 {m}" for m in LINE_REF_RE.findall(strip_fences(text))]
     errors += [f"C6 {rel}: 含本機絕對路徑 {root}" for root in sorted(roots) if root in text]
     return errors
@@ -177,9 +186,8 @@ def check_repo(repo: Path, required: dict[str, list[list[str]]]) -> list[str]:
             errors.append(f"C1 {rel}: 檔案不存在")
             continue
         text = path.read_text(encoding="utf-8")
-        if rel in required:
-            errors += check_sections(rel, text, required[rel])
-        else:
+        errors += check_sections(rel, text, required[rel])
+        if rel == PROGRESS:
             errors += check_progress(rel, text)
         errors += check_refs(path, repo)
         errors += check_leaks(rel, text, roots)
