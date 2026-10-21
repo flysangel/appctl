@@ -117,30 +117,30 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 
 ## 4. 設計取捨
 
-| 取捨 | 選了什麼 | 代價 |
-|---|---|---|
-| 動詞只有 `apply`、`delete`，不提供 `stop` | 命令式的暫停會讓叢集實況與 manifest 正本分岔，下次 `apply` 會靜默把服務拉回 | 要暫停得退回原生工具（`kubectl scale --replicas=0`、`podman pod stop <svc>-pod`）；`delete` 連卷刪，沒有「拆 pod 留卷」的動詞，要留卷只能繞過 `task`（待驗的做法列在 `docs/PROGRESS.md`） |
-| 工作負載收在共用 `base/`，兩軌只寫差異 | 兩軌對齊 kind 後，kustomize 原生的 base 與 overlay 就抽得乾淨，不需要自訂抽象；版號每個服務只寫一處 | `minio` 對不齊（見〈已知的結構性限制〉）；podman 軌的 `hostPort` 要靠 overlay patch 帶入 |
-| 映像參照直接寫在 `images:`，不做 `${REGISTRY_PREFIX}` 間接層，也不經 `envsubst` | 零字串替換，正本可以直接 `kubectl apply -k`；佔位用途只有 image 與 namespace，kustomize 原生欄位全部涵蓋 | 換 registry 要改每個服務的 `images:`；ncb 的 `server_name`、憑證路徑、上游三處寫死在 `default.conf`，只服務一個網域，多站要複製 server 區塊 |
-| manifest 只寫短名，短名一律帶服務名 | 帶服務名的短名在 Docker Hub 官方庫都不存在，`images:` 漏列時一定失敗；規則沒有例外，不需要 lint 執法 | `grafana-grafana`、`quay-quay-app` 這類重複字樣讀起來笨拙 |
-| 機密用 `secretGenerator` 宣告在 `secret/`，兩軌共用 | `apply -k`、`delete -k` 直接涵蓋 Secret，腳本不必自己建、自己刪 | 真值檔不在時整個部署流程（含純本地 `kubectl kustomize`）都失敗，要靠 `.example` 佔位值補位 |
-| Secret 與 ConfigMap 名稱不加內容雜湊 | podman 的 secret store 沒有 owner reference 與 GC，雜湊輪替會留下永久孤兒；`delete -k` 也只刪得掉當下那個雜湊 | k8s 軌改機密或設定不會觸發滾動更新，要手動 `rollout restart`；podman 軌每次 `apply` 都 `--replace` 重建 pod，沒有這個問題。雜湊政策寫在共用的 `secret/`，不能分軌設定 |
-| quay 的 `config.yaml` 不進版控 | `secretGenerator` 的 `files:` 不做變數替換，含密碼的設定檔只能整份當真值檔維護 | 換機器要照 `.example` 手抄並填回機密欄位；`.example` 補位只保證跑得起來，不保證跑得對 |
-| PVC 容量寫死在 `k8s/pvc.yaml`（minio 在 `volumeClaimTemplates`） | 單一環境下這個值不會變；抽成參數會讓它看起來可以隨時調整 | 要改容量得改這些檔，而且只在第一次部署生效 |
-| 不留部署鉤子（`post-apply.sh`） | 這個機制存在過三個版本，始終沒有任何服務用到 | 真的需要「部署後才能做的初始化」時要重新設計，目前由 `task seed` 扮演這個角色 |
-| 映像優先用 tag 釘，不用 digest | 和其他服務的寫法一致，比較好讀 | 同一個 tag 可能被重推，不像 digest 保證不可變；全部容器 `imagePullPolicy: IfNotPresent`，同 tag 重推後已有快取的節點或 podman 主機不會重拉，`apply` 成功但跑的是舊層，要清本機映像或改版號。minio 與 juicefs 還是 digest，因為 mirror 沒有版本 tag |
-| push 護欄是黑名單、盡力而為的第二道防線 | 主防線是真值與浮動參照不寫進版控；黑名單只能擋已知的樣式 | 沒列進黑名單的寫法擋不到 |
-| `assert-images.sh` 放在 `bin/`，不進 push 護欄 | 共用護欄只收全部 repo 都適用的檢查，它要 `kubectl` 與 `skopeo`，只對本 repo 有意義 | 這道守衛靠人記得跑，不是靠機制 |
-| 自動分流用 LiteLLM 內建的 `complexity_router`，由 `chat-local` 用 LLM 判斷難度 | 實測 LLM 判斷比 heuristic 加中文關鍵字準：heuristic 沒命中關鍵字的困難題都留在地端 | 分流不看圖片；知識庫聊天整段送去判斷；MEDIUM 送地端，部分困難題會留在地端；判斷由 LiteLLM 內部發出，升版要重驗 |
-| DLP 用 LiteLLM 內建的 guardrail：`custom_code` 的 `tw-dlp`，只綁在雲端別名上 | 實測多個候選，只有模型層 guardrail 沒有外洩，也不會連送地端的請求一起擋；fallback 到雲端時也會檢查。內建的 `content_filter` 不收 `structured_messages`，漏掉 `/v1/responses` 的 `instructions`；只看 `model` 決定要不要檢查的寫法，擋不住 fallback 到雲端的那一次 | 阻擋時回 200 加合成回答，不是錯誤；`chat-auto` 改由地端回答時沒有提示；新增雲端模型忘了綁就不檢查 |
-| podman 軌的 hostPort 都不設 hostIP，綁主機全部介面，對實驗室網段開放 | 實驗室其他主機要直接用網頁與 agent（litellm、openwebui）；manifest 不寫死主機 IP，換主機照用 | 每個 hostPort 都是 HTTP 明文：`/ui` 的 master key、gmm 的登入密碼與遠端桌面帳密都明文傳送；主機沒有防火牆，連得到主機的網段都能連每個 hostPort |
-| LiteLLM 不上 Redis，只跑 1 個 worker 與 1 個副本 | 限流、預算與路由狀態要加 worker 或副本才需要共用；LiteLLM 只轉送請求，推論在 vLLM，加了也不會變快 | 重新部署 LiteLLM 時服務中斷，沒有零停機 |
-| 動詞固定（清單用 `task --list-all` 查），服務與軌用 `SVC=`、`TRACK=` 帶入，不每服務開一份 taskfile | 服務多了 taskfile 不會跟著長；`includes` 與 `dir:` 的路徑坑一次都不用踩 | `task --list-all` 看不出有哪些服務，要 `ls services/` |
-| `bin/svc.sh` 不做 preflight，只驗 `services/<svc>/<軌>/` 目錄存在 | sudo、工具、埠占用、同名 pod 的檢查 kubectl 與 podman 自己都會報 | 錯誤訊息來自 kubectl 或 podman，不是腳本；hostPort 被占時建一半的 pod 會留著，見 `AGENTS.md`〈地雷〉 |
-| 全部服務部署到 `default` namespace，腳本不建 namespace | 單一環境不需要用 namespace 隔離；`delete` 列 PVC 時可以寫死 `-n default` | overlay 的 `namespace:` 改成叢集沒有的名字，`apply -k` 直接失敗 |
-| 營運工具（`task seed`）在操作者主機跑 `services/<svc>/sync.sh`，不放進叢集排程 | 機密從本機 gitignored 檔讀，manifest 不放真值，也不在執行期 clone repo | 要排程得靠主機的 cron；各 `sync.sh` 要的工具得裝在主機上（見 `README.md`〈前置需求〉） |
-| quay 的 quay-app、postgres、redis 放同一個 pod | config.yaml 的 DB 與 redis host 都寫 `127.0.0.1`，兩軌共用同一份，不必像 litellm 由 overlay 改寫 | 三容器沒有啟動順序控制（待辦在 `docs/PROGRESS.md`）；quay-app 不能獨立擴 |
-| podman 軌用具名卷，不用 hostPath | 免掉建目錄、`setfacl` 給容器 uid 寫入權、清理白名單、`.gitignore` 排除 runtime 目錄四件事；所有權與生命週期由 podman 管 | 資料不在 repo 目錄下，取檔要 `sudo podman volume inspect` 找 mountpoint，備份走 `podman volume export` |
+| 取捨 | 選了什麼 | 代價 | 擋下它的檢查 |
+|---|---|---|---|
+| 動詞只有 `apply`、`delete`，不提供 `stop` | 命令式的暫停會讓叢集實況與 manifest 正本分岔，下次 `apply` 會靜默把服務拉回 | 要暫停得退回原生工具（`kubectl scale --replicas=0`、`podman pod stop <svc>-pod`）；`delete` 連卷刪，沒有「拆 pod 留卷」的動詞，要留卷只能繞過 `task`（待驗的做法列在 `docs/PROGRESS.md`） | `tests/test_svc.py` 的 `test_bad_verb_and_bad_track_fail` 擋下 `bin/svc.sh` 收其他動詞 |
+| 工作負載收在共用 `base/`，兩軌只寫差異 | 兩軌對齊 kind 後，kustomize 原生的 base 與 overlay 就抽得乾淨，不需要自訂抽象；版號每個服務只寫一處 | `minio` 對不齊（見〈已知的結構性限制〉）；podman 軌的 `hostPort` 要靠 overlay patch 帶入 | 無程式擋 |
+| 映像參照直接寫在 `images:`，不做 `${REGISTRY_PREFIX}` 間接層，也不經 `envsubst` | 零字串替換，正本可以直接 `kubectl apply -k`；佔位用途只有 image 與 namespace，kustomize 原生欄位全部涵蓋 | 換 registry 要改每個服務的 `images:`；ncb 的 `server_name`、憑證路徑、上游三處寫死在 `default.conf`，只服務一個網域，多站要複製 server 區塊 | 無程式擋 |
+| manifest 只寫短名，短名一律帶服務名 | 帶服務名的短名在 Docker Hub 官方庫都不存在，`images:` 漏列時一定失敗；規則沒有例外，不需要 lint 執法 | `grafana-grafana`、`quay-quay-app` 這類重複字樣讀起來笨拙 | `task image:check` 只擋沒換成完整參照的短名；短名帶不帶服務名，無程式擋 |
+| 機密用 `secretGenerator` 宣告在 `secret/`，兩軌共用 | `apply -k`、`delete -k` 直接涵蓋 Secret，腳本不必自己建、自己刪 | 真值檔不在時整個部署流程（含純本地 `kubectl kustomize`）都失敗，要靠 `.example` 佔位值補位 | 無程式擋 |
+| Secret 與 ConfigMap 名稱不加內容雜湊 | podman 的 secret store 沒有 owner reference 與 GC，雜湊輪替會留下永久孤兒；`delete -k` 也只刪得掉當下那個雜湊 | k8s 軌改機密或設定不會觸發滾動更新，要手動 `rollout restart`；podman 軌每次 `apply` 都 `--replace` 重建 pod，沒有這個問題。雜湊政策寫在共用的 `secret/`，不能分軌設定 | 無程式擋 |
+| quay 的 `config.yaml` 不進版控 | `secretGenerator` 的 `files:` 不做變數替換，含密碼的設定檔只能整份當真值檔維護 | 換機器要照 `.example` 手抄並填回機密欄位；`.example` 補位只保證跑得起來，不保證跑得對 | 無程式擋 |
+| PVC 容量寫死在 `k8s/pvc.yaml`（minio 在 `volumeClaimTemplates`） | 單一環境下這個值不會變；抽成參數會讓它看起來可以隨時調整 | 要改容量得改這些檔，而且只在第一次部署生效 | 無程式擋 |
+| 不留部署鉤子（`post-apply.sh`） | 這個機制存在過三個版本，始終沒有任何服務用到 | 真的需要「部署後才能做的初始化」時要重新設計，目前由 `task seed` 扮演這個角色 | 無程式擋 |
+| 映像優先用 tag 釘，不用 digest | 和其他服務的寫法一致，比較好讀 | 同一個 tag 可能被重推，不像 digest 保證不可變；全部容器 `imagePullPolicy: IfNotPresent`，同 tag 重推後已有快取的節點或 podman 主機不會重拉，`apply` 成功但跑的是舊層，要清本機映像或改版號。minio 與 juicefs 還是 digest，因為 mirror 沒有版本 tag | 無程式擋 |
+| push 護欄是黑名單、盡力而為的第二道防線 | 主防線是真值與浮動參照不寫進版控；黑名單只能擋已知的樣式 | 沒列進黑名單的寫法擋不到 | `.githooks/pre-push` 的 forbidden 掃描本身 |
+| `assert-images.sh` 放在 `bin/`，不進 push 護欄 | `pre-push` 只放幾秒內跑得完的檢查。它要逐一連 registry 查映像；`pre-push` 展開的樹也沒有 `secret.env`，有機密的服務在 kustomize 就失敗 | 這道守衛靠人記得跑，不是靠機制 | 無程式擋 |
+| 自動分流用 LiteLLM 內建的 `complexity_router`，由 `chat-local` 用 LLM 判斷難度 | 實測 LLM 判斷比 heuristic 加中文關鍵字準：heuristic 沒命中關鍵字的困難題都留在地端 | 分流不看圖片；知識庫聊天整段送去判斷；MEDIUM 送地端，部分困難題會留在地端；判斷由 LiteLLM 內部發出，升版要重驗 | `task litellm:check` 的分流情境，要部署 litellm |
+| DLP 用 LiteLLM 內建的 guardrail：`custom_code` 的 `tw-dlp`，只綁在雲端別名上 | 實測多個候選，只有模型層 guardrail 沒有外洩，也不會連送地端的請求一起擋；fallback 到雲端時也會檢查。內建的 `content_filter` 不收 `structured_messages`，漏掉 `/v1/responses` 的 `instructions`；只看 `model` 決定要不要檢查的寫法，擋不住 fallback 到雲端的那一次 | 阻擋時回 200 加合成回答，不是錯誤；`chat-auto` 改由地端回答時沒有提示；新增雲端模型忘了綁就不檢查 | `task litellm:check` 的 DLP 情境，要部署 litellm；新增雲端模型忘了綁，無程式擋 |
+| podman 軌的 hostPort 都不設 hostIP，綁主機全部介面，對實驗室網段開放 | 實驗室其他主機要直接用網頁與 agent（litellm、openwebui）；manifest 不寫死主機 IP，換主機照用 | 每個 hostPort 都是 HTTP 明文：`/ui` 的 master key、gmm 的登入密碼與遠端桌面帳密都明文傳送；主機沒有防火牆，連得到主機的網段都能連每個 hostPort | 無程式擋 |
+| LiteLLM 不上 Redis，只跑 1 個 worker 與 1 個副本 | 限流、預算與路由狀態要加 worker 或副本才需要共用；LiteLLM 只轉送請求，推論在 vLLM，加了也不會變快 | 重新部署 LiteLLM 時服務中斷，沒有零停機 | 無程式擋 |
+| 動詞固定（清單用 `task --list-all` 查），服務與軌用 `SVC=`、`TRACK=` 帶入，不每服務開一份 taskfile | 服務多了 taskfile 不會跟著長；`includes` 與 `dir:` 的路徑坑一次都不用踩 | `task --list-all` 看不出有哪些服務，要 `ls services/` | 無程式擋 |
+| `bin/svc.sh` 不做 preflight，只驗 `services/<svc>/<軌>/` 目錄存在 | sudo、工具、埠占用、同名 pod 的檢查 kubectl 與 podman 自己都會報 | 錯誤訊息來自 kubectl 或 podman，不是腳本；hostPort 被占時建一半的 pod 會留著，見 `AGENTS.md`〈地雷〉 | `tests/test_svc.py` 的 `test_missing_track_dir_fails` 擋下目錄守衛失效；不加其他 preflight 這件事，無程式擋 |
+| 全部服務部署到 `default` namespace，腳本不建 namespace | 單一環境不需要用 namespace 隔離；`delete` 列 PVC 時可以寫死 `-n default` | overlay 的 `namespace:` 改成叢集沒有的名字，`apply -k` 直接失敗 | 無程式擋 |
+| 營運工具（`task seed`）在操作者主機跑 `services/<svc>/sync.sh`，不放進叢集排程 | 機密從本機 gitignored 檔讀，manifest 不放真值，也不在執行期 clone repo | 要排程得靠主機的 cron；各 `sync.sh` 要的工具得裝在主機上（見 `README.md`〈安裝〉） | 無程式擋 |
+| quay 的 quay-app、postgres、redis 放同一個 pod | config.yaml 的 DB 與 redis host 都寫 `127.0.0.1`，兩軌共用同一份，不必像 litellm 由 overlay 改寫 | 三容器沒有啟動順序控制（待辦在 `docs/PROGRESS.md`）；quay-app 不能獨立擴 | 無程式擋 |
+| podman 軌用具名卷，不用 hostPath | 免掉建目錄、`setfacl` 給容器 uid 寫入權、清理白名單、`.gitignore` 排除 runtime 目錄四件事；所有權與生命週期由 podman 管 | 資料不在 repo 目錄下，取檔要 `sudo podman volume inspect` 找 mountpoint，備份走 `podman volume export` | 無程式擋 |
 
 ### 測試只靠 bash 與 python
 

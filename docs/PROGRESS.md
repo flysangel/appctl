@@ -12,8 +12,8 @@
 ## 2. 進行中
 
 - 這個分支做什麼：harness-adopt，把 app-services 改成 `~/.claude/rules/harness.md` 的新契約。
-- 做到哪：第 7 步，兩支檢查副本已換成範本 repo 的新契約版。
-- 下一步：第 8 步，README 改新版必要節，ARCHITECTURE〈設計取捨〉補檢查名稱。
+- 做到哪：第 8 步，README 改成新版必要節，ARCHITECTURE〈設計取捨〉每條寫出檢查名稱。
+- 下一步：第 9 步，全套驗證，並在拋棄式 clone 跑真的 pre-push。
 
 ## 3. 待辦
 
@@ -24,11 +24,11 @@
 - 決定 quay `secret.env` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 去留：沒有容器引用它們，quay 讀的是 `config.yaml` 內的同名鍵，兩處各自漂移。拿掉，或讓上面那條檢查也比對這兩鍵
 - `services/gmm/sync.sh` 把 `GUACAMOLE_PASS` 放進 curl 的 `--data-urlencode`、把 token 放進 `?token=`、把目標主機密碼放進 `--data-raw`，三者都進 argv，`ps` 看得到，違反 `AGENTS.md`〈不要做的事〉。改成 `Guacamole-Token` 標頭（映像內的 guacamole 1.6.0 支援），密碼與 JSON 改經 stdin 或 `curl -K -` 餵
 - `services/gmm/sync.sh` 不看任何 API 回應，永遠以 0 結束。改成檢查每次 curl 的 HTTP 狀態碼，失敗計數後以非零結束；mapping 行解析失敗時中止、不進 cleanup；`sync.sh test` 加 `mapping.list` 存在與欄數檢查。做完改 `AGENTS.md`〈會刪資料的動作，先問使用者〉gmm 那條與 `README.md`〈營運同步（`task seed`）〉最後一條
-- 補 `services/quay/sync.sh` 種第一位 superuser（等 `/health/instance` 回 200 後 `POST /api/v1/user/initialize`），讓 `task seed SVC=quay` 接手 `README.md`〈上手〉的手動步驟
+- 補 `services/quay/sync.sh` 種第一位 superuser（等 `/health/instance` 回 200 後 `POST /api/v1/user/initialize`），讓 `task seed SVC=quay` 接手 `README.md`〈quay 的第一位 superuser〉的手動步驟
 - `services/quay/k8s/ingress.yaml` 補 `nginx.ingress.kubernetes.io/proxy-body-size`：ingress-nginx 文件的預設 body 上限是 1m，推映像層會 413；infra-k8s 的 ingress addon 沒有全域設定
 - quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`task apply` 回來時 quay 還沒就緒
-- grafana 的 admin 密碼納入 `secret/secret.env`（`GF_SECURITY_ADMIN_PASSWORD`），不再用上游預設 admin/admin。做完改 `README.md`〈上手〉grafana 那段
-- 決定 ncb 的 certbot 容器去留：`server_name` 是 `ncb.local`，ACME 不簽，手放的憑證沒有 renewal 設定檔，`renew` 迴圈等於沒做事。拿掉容器，或改成公網網域（公網 DNS 不在本 repo 範圍）。做完改 `docs/ARCHITECTURE.md`〈已知的結構性限制〉ncb 那條與 `README.md`〈上手〉
+- grafana 的 admin 密碼納入 `secret/secret.env`（`GF_SECURITY_ADMIN_PASSWORD`），不再用上游預設 admin/admin。做完改 `README.md`〈grafana 的第一次登入〉
+- 決定 ncb 的 certbot 容器去留：`server_name` 是 `ncb.local`，ACME 不簽，手放的憑證沒有 renewal 設定檔，`renew` 迴圈等於沒做事。拿掉容器，或改成公網網域（公網 DNS 不在本 repo 範圍）。做完改 `docs/ARCHITECTURE.md`〈已知的結構性限制〉ncb 那條與 `README.md`〈ncb 的憑證〉
 - 把 `AGENTS.md`〈真環境煙測要逐條手動跑〉的手動煙測清單寫成 podman 軌腳本（apply → 等 Running → 探測 → 登入 → 再 apply → delete → 確認 pod 與卷不在），一個服務失敗記錄後繼續跑下一個，結尾才決定退出碼；比照 `task litellm:check` 放進 Taskfile。做完改 `AGENTS.md`〈真環境煙測要逐條手動跑〉
 - `task test` 改成每支測試檔都要印 `ALL <n> PASS`，沒印就算失敗。現在漏寫 `__main__` 的測試檔零輸出、回 0，`task test` 會把它當成通過
 - `Taskfile.yaml` 的 `test` 改成自動收 `tests/test_*.py`，不逐行列檔。做完連同上一條，刪 `AGENTS.md`〈`task test` 回 0 不等於每支都跑了〉
@@ -48,6 +48,6 @@
 - gmm 接 AD 時開 LDAP：映像有 LDAP 擴充，在 `services/gmm/base/deployment.yaml` 加 `LDAP_*` env，`LDAP_SEARCH_BIND_PASSWORD` 走 `secret/secret.env`（要接 AD 時）
 - gmm 的 guacd 一直以 `GUACD_LOG_LEVEL=debug` 跑，正式環境改 `info`（log 量成問題時）
 - ncb 的 `default.conf` 對所有請求固定送 `Connection "upgrade"`，沒有 `proxy_buffering off`。改成 `map $http_upgrade` 決定 Connection 值，並補 `proxy_buffering off`（上游回 400，或串流回應卡住時）
-- 實測 ncb 的憑證順序：先放自簽讓 nginx 起來、再 `certonly --webroot`、再 `nginx -s reload`。現在 README 寫的是這個順序但沒跑過；結果寫回 `README.md`〈上手〉（下次改 ncb 啟動流程時）
+- 實測 ncb 的憑證順序：先放自簽讓 nginx 起來、再 `certonly --webroot`、再 `nginx -s reload`。現在 README 寫的是這個順序但沒跑過；結果寫回 `README.md`〈ncb 的憑證〉（下次改 ncb 啟動流程時）
 - 驗證 `bin/svc.sh` 對 podman `delete` 的 exit 125 容錯（podman 軌開始產出 `PersistentVolumeClaim` doc 時）
 - 驗「拆 pod 留卷」的手動做法：`kubectl kustomize services/<svc>/podman | sudo podman kube down -` 不帶 `--force` 是否留下具名卷。成立就寫進 `README.md`〈拆除與暫停〉（有人要暫停又不能用 `pod stop` 時）
