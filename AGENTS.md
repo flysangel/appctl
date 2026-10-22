@@ -129,8 +129,8 @@ LiteLLM 現在只跑 1 個 worker 與 1 個副本，沒有 Redis。限流計數�
 
 下面各層全部通過，才算完成：
 
-- L1：`task lint`。exit 0。
-- L2：`task test`。每支測試檔都要印 `ALL <n> PASS`，exit 0。
+- L1：`task lint` 回 0。
+- L2：`task test`。每支測試檔都要印 `ALL <n> PASS`，而且 `task test` 回 0。
 - L3：真環境。只在改到跨元件的路徑時才跑，例如部署流程、服務之間的連線、litellm 的 DLP 與分流。要跑哪些，見〈改了哪類檔要多驗什麼〉。
 
 ### 改了哪類檔要多驗什麼

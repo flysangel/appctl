@@ -122,12 +122,12 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 | 動詞只有 `apply`、`delete`，不提供 `stop` | 命令式的暫停會讓叢集實況與 manifest 正本分岔，下次 `apply` 會靜默把服務拉回 | 要暫停得退回原生工具（`kubectl scale --replicas=0`、`podman pod stop <svc>-pod`）；`delete` 連卷刪，沒有「拆 pod 留卷」的動詞，要留卷只能繞過 `task`（待驗的做法列在 `docs/PROGRESS.md`） | `tests/test_svc.py` 的 `test_bad_verb_and_bad_track_fail` 擋下 `bin/svc.sh` 收其他動詞 |
 | 工作負載收在共用 `base/`，兩軌只寫差異 | 兩軌對齊 kind 後，kustomize 原生的 base 與 overlay 就抽得乾淨，不需要自訂抽象；版號每個服務只寫一處 | `minio` 對不齊（見〈已知的結構性限制〉）；podman 軌的 `hostPort` 要靠 overlay patch 帶入 | 無程式擋 |
 | 映像參照直接寫在 `images:`，不做 `${REGISTRY_PREFIX}` 間接層，也不經 `envsubst` | 零字串替換，正本可以直接 `kubectl apply -k`；佔位用途只有 image 與 namespace，kustomize 原生欄位全部涵蓋 | 換 registry 要改每個服務的 `images:`；ncb 的 `server_name`、憑證路徑、上游三處寫死在 `default.conf`，只服務一個網域，多站要複製 server 區塊 | 無程式擋 |
-| manifest 只寫短名，短名一律帶服務名 | 帶服務名的短名在 Docker Hub 官方庫都不存在，`images:` 漏列時一定失敗；規則沒有例外，不需要 lint 執法 | `grafana-grafana`、`quay-quay-app` 這類重複字樣讀起來笨拙 | `task image:check` 只擋沒換成完整參照的短名；短名帶不帶服務名，無程式擋 |
+| manifest 只寫短名，短名一律帶服務名 | 帶服務名的短名在 Docker Hub 官方庫都不存在，`images:` 漏列時一定失敗；規則沒有例外，不需要 lint 來擋 | `grafana-grafana`、`quay-quay-app` 這類重複字樣讀起來笨拙 | `task image:check` 只擋沒換成完整參照的短名；短名帶不帶服務名，無程式擋 |
 | 機密用 `secretGenerator` 宣告在 `secret/`，兩軌共用 | `apply -k`、`delete -k` 直接涵蓋 Secret，腳本不必自己建、自己刪 | 真值檔不在時整個部署流程（含純本地 `kubectl kustomize`）都失敗，要靠 `.example` 佔位值補位 | 無程式擋 |
 | Secret 與 ConfigMap 名稱不加內容雜湊 | podman 的 secret store 沒有 owner reference 與 GC，雜湊輪替會留下永久孤兒；`delete -k` 也只刪得掉當下那個雜湊 | k8s 軌改機密或設定不會觸發滾動更新，要手動 `rollout restart`；podman 軌每次 `apply` 都 `--replace` 重建 pod，沒有這個問題。雜湊政策寫在共用的 `secret/`，不能分軌設定 | 無程式擋 |
 | quay 的 `config.yaml` 不進版控 | `secretGenerator` 的 `files:` 不做變數替換，含密碼的設定檔只能整份當真值檔維護 | 換機器要照 `.example` 手抄並填回機密欄位；`.example` 補位只保證跑得起來，不保證跑得對 | 無程式擋 |
 | PVC 容量寫死在 `k8s/pvc.yaml`（minio 在 `volumeClaimTemplates`） | 單一環境下這個值不會變；抽成參數會讓它看起來可以隨時調整 | 要改容量得改這些檔，而且只在第一次部署生效 | 無程式擋 |
-| 不留部署鉤子（`post-apply.sh`） | 這個機制存在過三個版本，始終沒有任何服務用到 | 真的需要「部署後才能做的初始化」時要重新設計，目前由 `task seed` 扮演這個角色 | 無程式擋 |
+| 不留部署鉤子（`post-apply.sh`） | 這個機制存在過三個版本，始終沒有任何服務用到 | 真的需要「部署後才能做的初始化」時要重新設計，目前由 `task seed` 負責這件事 | 無程式擋 |
 | 映像優先用 tag 釘，不用 digest | 和其他服務的寫法一致，比較好讀 | 同一個 tag 可能被重推，不像 digest 保證不可變；全部容器 `imagePullPolicy: IfNotPresent`，同 tag 重推後已有快取的節點或 podman 主機不會重拉，`apply` 成功但跑的是舊層，要清本機映像或改版號。minio 與 juicefs 還是 digest，因為 mirror 沒有版本 tag | 無程式擋 |
 | push 護欄是黑名單、盡力而為的第二道防線 | 主防線是真值與浮動參照不寫進版控；黑名單只能擋已知的樣式 | 沒列進黑名單的寫法擋不到 | `.githooks/pre-push` 的 forbidden 掃描本身 |
 | `assert-images.sh` 放在 `bin/`，不進 push 護欄 | `pre-push` 只放幾秒內跑得完的檢查。它要逐一連 registry 查映像；`pre-push` 展開的樹也沒有 `secret.env`，有機密的服務在 kustomize 就失敗 | 這道守衛靠人記得跑，不是靠機制 | 無程式擋 |
