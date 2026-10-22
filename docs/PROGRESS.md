@@ -5,7 +5,7 @@
 - 標準驗證路徑：`task doctor` → `task lint` → `task test`。真環境驗證照 `AGENTS.md`〈完成定義〉的 L3，要部署服務。
 - 綠的層：`task doctor`、`task lint`、`task test`。
 - 已跑過 harness-adopt，`bin/check-docs.py` 與 `.githooks/` 是範本 repo 的新契約副本。
-- `bin/check-taskfile.py` 目前會略過本 repo，因為 Taskfile〈分類原則〉還沒套用，見〈待辦〉。
+- `bin/check-taskfile.py` 目前會略過本 repo，因為本 repo 還沒套用 Taskfile〈分類原則〉，見〈待辦〉。
 - 已知壞掉：`litellm` 的 k8s 軌連不到地端模型，`vllm` 還沒有 k8s 軌，見〈待辦〉。
 - 未驗證：ncb 的憑證順序、`bin/svc.sh` 對 podman `delete` 的 exit 125 容錯、「拆 pod 留卷」的手動做法，見〈待辦〉。
 - blocker：沒有。
