@@ -9,9 +9,15 @@
 - LiteLLM 的 DLP 與自動分流都用內建功能，設定在 `services/litellm/base/config.yaml`。
 - 改結構前先讀 `docs/ARCHITECTURE.md`〈依賴與資料流〉。
 - 沒有 CI，所有驗證都在本機。不要假設遠端有東西幫你擋。
-- push 護欄由工作區根 repo 管理，本 repo 沒有自己的 hook。細節見工作區根 repo 的 `AGENTS.md`。
+- push 護欄是本 repo 自帶的 `.githooks/pre-push`，由帳號層派工 hook 呼叫。兩層怎麼串，見 `~/.claude/rules/githooks.md`〈兩層 hook 怎麼串〉。
 
-## 2. 動手前
+## 2. 開工
+
+1. 讀 `docs/PROGRESS.md`〈目前狀態〉。
+2. 跑 `task doctor`。
+3. 跑 `task lint` 與 `task test`。
+
+基準是紅的時，先修好，再開始新工作。
 
 ### 機密真值檔就在本機磁碟上
 
@@ -43,11 +49,11 @@
 4. `services/<svc>/{podman,k8s}/kustomization.yaml`：`namespace: default`、`resources: [../base]`，加該軌專屬的資源（podman 的 hostPort patch；k8s 的 `service.yaml`、`ingress.yaml`、`pvc.yaml`）。podman 軌的 `hostPort` 用 JSON6902 加 `op: test`，照既有服務的 overlay 抄，不用 strategic merge。
 5. 只支援一軌，就只建一個目錄。目錄存在就代表支援。
 6. 有機密時，建 `services/<svc>/secret/`，放 `kustomization.yaml`（`secretGenerator` 加 `generatorOptions.disableNameSuffixHash: true`）與 `secret.env.example`（佔位值，進版控）。兩軌的 `resources:` 各加一行 `../secret`。沒有機密的服務不要建這個目錄：`resources` 指向不存在的目錄，kustomize 會直接失敗。
-7. 跑〈改完要驗〉。
+7. 跑〈完成定義〉。
 
 ### 改映像版本
 
-改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見工作區根 repo 的 `AGENTS.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。`vllm` 的容器共用同一顆映像，但短名各一筆，base 的每一筆都要改。
+改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。`vllm` 的容器共用同一顆映像，但短名各一筆，base 的每一筆都要改。
 
 改完跑 `task image:check SVC=<svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。vllm 與 pgvector 的 mirror 只收目前使用的次版號（images 的 `sync/repository/vllm.yaml`、`pgvector.yaml`），升次版號要先去 images 改規則並同步一次，否則 `task image:check` 查不到映像。
 
@@ -64,11 +70,11 @@
 
 manifest 的 `image:` 寫短名，完整參照在 `kustomization.yaml` 的 `images:`。`name:` 對不上時，kustomize 回 0、不警告，產物原樣留著短名。短名如果剛好是 Docker Hub 官方庫的名字（例如 `nginx`、`mariadb`、`redis`），就會拉到能正常啟動的錯映像。所以短名一律帶服務名。
 
-能擋這件事的是 `bin/assert-images.sh`，它只在 `task image:check` 跑，**push 時不會跑**：共用護欄只收全部 repo 都適用的檢查。改了 `images:` 或 manifest 的 `image:`，要自己跑。
+能擋這件事的是 `bin/assert-images.sh`，它只在 `task image:check` 跑，**push 時不會跑**：它要逐一連 registry 查映像，不是幾秒內跑得完的檢查。改了 `images:` 或 manifest 的 `image:`，要自己跑。
 
 ### `services/` 底下不要寫 `docker.io/` 字面值
 
-push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它擋哪些樣式見工作區根 repo 的 `.githooks/forbidden-patterns.txt`，不要把樣式抄進本檔。映像要用 mirror 的完整參照，寫在 `services/<svc>/base/kustomization.yaml` 的 `images:`。要舉例時，改講法或指路徑。哪些路徑不掃，見工作區根 repo 的 `.claude/rules/githooks.md`〈各道掃描的例外不一樣〉。
+push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它擋哪些樣式見 `.githooks/forbidden-patterns.txt`，不要把樣式抄進本檔。映像要用 mirror 的完整參照，寫在 `services/<svc>/base/kustomization.yaml` 的 `images:`。要舉例時，改講法或指路徑。哪些路徑不掃，見 `~/.claude/rules/githooks.md`〈各道掃描的例外不一樣〉。
 
 ### 手動跑 `kubectl kustomize` 前，要先備好機密檔
 
@@ -119,27 +125,38 @@ LiteLLM 現在只跑 1 個 worker 與 1 個副本，沒有 Redis。限流計數�
 
 做完後，帶 key 打 `/health/readiness/details`，確認 `show_no_redis_warning` 是 `false`；再讀設定檔，確認 `router_settings.redis_host` 有值。前一步驗不到路由器那一處。
 
-## 4. 改完要驗
+## 4. 完成定義
 
-```bash
-task test                              # 離線單元測試，必跑。每支測試檔印 ALL <n> PASS
-kubectl kustomize services/<svc>/k8s   # 該服務正本的語法；podman 軌同樣跑一次
-bash bin/assert-images.sh <svc>        # 渲染產物的 image 都是完整參照，而且還在來源 registry（task image:check 也跑這支）
-task litellm:check                     # 實機回歸：對執行中的 litellm 跑 DLP 與分流情境。重新部署 litellm 後必跑
-```
+下面各層全部通過，才算完成：
 
-- `task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務。該任務逐行列出測試檔，不會自動收新檔。新檔的檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。這兩個坑的消除法列在 `docs/PROGRESS.md`，做完就刪這段。
-- `python3 -m pytest tests/` 也能跑同一批測試，但會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。
-- `task litellm:check` 呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
+- L1：`task lint`。exit 0。
+- L2：`task test`。每支測試檔都要印 `ALL <n> PASS`，exit 0。
+- L3：真環境。只在改到跨元件的路徑時才跑，例如部署流程、服務之間的連線、litellm 的 DLP 與分流。要跑哪些，見〈改了哪類檔要多驗什麼〉。
+
+### 改了哪類檔要多驗什麼
+
+- 改了 manifest 或 `kustomization.yaml`：跑 `kubectl kustomize services/<svc>/k8s`，podman 軌同樣跑一次。先備好機密檔，見〈手動跑 `kubectl kustomize` 前，要先備好機密檔〉。
+- 改了 `images:` 或 manifest 的 `image:`：跑 `task image:check SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
-- 其他真環境煙測沒有腳本，要逐條手動跑。宣稱完成前，要真的跑過並貼出輸出。寫成腳本列在 `docs/PROGRESS.md`。順序：
-  1. `apply`。
-  2. 等 pod 到 Running。podman 軌用 `sudo podman pod inspect <pod> --format '{{.State}}'`，pod 不存在時回非零。
-  3. HTTP 探測。gmm：`GET /guacamole/` 回 2xx 或 3xx。grafana：`GET /api/health` 的 `.database` 是 `ok`。quay：`GET /health/instance` 回 200，第一次啟動要跑 migration，會等一陣子。ncb：`GET http://127.0.0.1/` 回 301。
-  4. 登入。gmm 用 `POST /guacamole/api/tokens` 取 `authToken`。
-  5. 再 `apply` 一次，重做第 2、3 步。
-  6. `delete`，確認 pod 與卷都不在。
-- 想手動驗一次 push 護欄，照工作區根 repo 的 `.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
+- 重新部署 litellm 後：跑 `task litellm:check`。它呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
+- 改了 `.githooks/` 或 `bin/check-*.py`：照 `~/.claude/rules/githooks.md`〈改了 `.githooks/` 底下任何東西〉再跑一次真的 hook。手動跑時照 `~/.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
+
+### `task test` 回 0 不等於每支都跑了
+
+`task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務。該任務逐行列出測試檔，不會自動收新檔。新檔的檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。這兩個坑的消除法列在 `docs/PROGRESS.md`，做完就刪這段。
+
+`python3 -m pytest tests/` 也能跑同一批測試，但會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。
+
+### 真環境煙測要逐條手動跑
+
+煙測沒有腳本。宣稱完成前，要真的跑過並貼出輸出。寫成腳本列在 `docs/PROGRESS.md`。順序：
+
+1. `apply`。
+2. 等 pod 到 Running。podman 軌用 `sudo podman pod inspect <pod> --format '{{.State}}'`，pod 不存在時回非零。
+3. HTTP 探測。gmm：`GET /guacamole/` 回 2xx 或 3xx。grafana：`GET /api/health` 的 `.database` 是 `ok`。quay：`GET /health/instance` 回 200，第一次啟動要跑 migration，會等一陣子。ncb：`GET http://127.0.0.1/` 回 301。
+4. 登入。gmm 用 `POST /guacamole/api/tokens` 取 `authToken`。
+5. 再 `apply` 一次，重做第 2、3 步。
+6. `delete`，確認 pod 與卷都不在。
 
 ## 5. 不要做的事
 
@@ -152,4 +169,4 @@ task litellm:check                     # 實機回歸：對執行中的 litellm 
 | 「補齊」`minio` 的 podman 軌讓它共用 base | `podman kube play` 不支援 `StatefulSet`，做不到 |
 | 在 `docs/` 放四大文件以外的檔 | 沒人連得到，會和程式漂移。`docs/superpowers/` 與 `docs/tickets/` 是本機暫存，已 gitignore |
 | 把機密放進命令列、URL、scratchpad 或 commit 訊息 | 會出現在 `ps`、log 或版控 |
-| 在本 repo 設 local 或 worktree 作用域的 `core.hooksPath` | 會蓋過工作區的設定，push 護欄靜默失效。見工作區根 repo 的 `AGENTS.md`〈`core.hooksPath` 被 local 設定蓋過，護欄會靜默失效〉 |
+| 在本 repo 設 local 或 worktree 作用域的 `core.hooksPath` | git 改用那個目錄，不經過帳號層派工 hook，機密掃描與本 repo 的 `pre-push` 都靜默失效。`task doctor` 會查。細節見 `~/.claude/rules/githooks.md`〈repo 自設 local `core.hooksPath` 會繞過帳號層機密掃描〉 |
