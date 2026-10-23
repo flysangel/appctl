@@ -68,7 +68,7 @@ def test_test_mode_skips_confirm():
     r, calls = run_sync("test", stdin="")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Success: token ok" in r.stdout, r.stdout
-    assert "確認" not in r.stdout, r.stdout
+    assert len(calls) == 1, calls
 
 
 def test_sync_right_name_proceeds():

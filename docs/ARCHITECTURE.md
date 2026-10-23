@@ -17,7 +17,7 @@
 ## 2. 目錄結構
 
 ```
-Taskfile.yaml              唯一入口，task --list-all 列清單
+Taskfile.yaml              唯一入口，task 印角色選單，task --list-all 列全部
 LICENSE                    Apache License 2.0 全文
 
 bin/
