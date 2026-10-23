@@ -29,7 +29,7 @@
 ### 會刪資料的動作，先問使用者
 
 - `task delete`：k8s 軌連 manifest 內宣告的 PVC 一起刪，叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料跟著消失；podman 軌連具名卷一起移除。
-- `task seed SVC=gmm`：刪除 `mapping.env` 以外多餘的 user、group、connection。欄數不對的行會印 `Error` 跳過，但 cleanup 照跑，那一行的 user、group、connection 也算「以外」，一起被刪；`task seed:check` 不驗 `mapping.env`。改成解析失敗就中止列在 `docs/PROGRESS.md`。
+- `task seed SVC=gmm`：刪除 `mapping.env` 以外多餘的 user、group、connection。腳本動資料前要求輸入服務名，沒有 tty 時中止。欄數不對的行會印 `Error` 跳過，但 cleanup 照跑，那一行的 user、group、connection 也算「以外」，一起被刪；`task check:seed` 不驗 `mapping.env`。改成解析失敗就中止列在 `docs/PROGRESS.md`。
 - `task delete SVC=ncb TRACK=podman`：連 `ncb-certbot` 卷刪掉，憑證一起消失。Let's Encrypt 的 rate limits 文件寫同一組網域每 7 天只簽 5 張重複憑證，刪了再簽會撞上限。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 是叢集最高權服務，帳密不能輪換。要部署前，先確認網段隔離。
 
@@ -39,7 +39,7 @@
 
 - 從主工作樹複製真值檔進 worktree，用 `cp -p` 保留原權限。
 - `git worktree remove` 會連同 worktree 裡的機密檔一起刪掉，主工作樹要留一份。
-- `task litellm:check` 也從兩份 `secret.env` 讀 key，在 worktree 裡跑之前同樣要先複製。
+- `task check:litellm` 也從兩份 `secret.env` 讀 key，在 worktree 裡跑之前同樣要先複製。
 
 ### 加一個服務
 
@@ -55,7 +55,7 @@
 
 改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。`vllm` 的容器共用同一顆映像，但短名各一筆，base 的每一筆都要改。
 
-改完跑 `task image:check SVC=<svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。vllm 與 pgvector 的 mirror 只收目前使用的次版號（images 的 `sync/repository/vllm.yaml`、`pgvector.yaml`），升次版號要先去 images 改規則並同步一次，否則 `task image:check` 查不到映像。
+改完跑 `task check:image SVC=<svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。vllm 與 pgvector 的 mirror 只收目前使用的次版號（images 的 `sync/repository/vllm.yaml`、`pgvector.yaml`），升次版號要先去 images 改規則並同步一次，否則 `task check:image` 查不到映像。
 
 ### 寫程式的規矩
 
@@ -70,7 +70,7 @@
 
 manifest 的 `image:` 寫短名，完整參照在 `kustomization.yaml` 的 `images:`。`name:` 對不上時，kustomize 回 0、不警告，產物原樣留著短名。短名如果剛好是 Docker Hub 官方庫的名字（例如 `nginx`、`mariadb`、`redis`），就會拉到能正常啟動的錯映像。所以短名一律帶服務名。
 
-能擋這件事的是 `bin/assert-images.sh`，它只在 `task image:check` 跑，**push 時不會跑**：它要逐一連 registry 查映像，不是幾秒內跑得完的檢查。改了 `images:` 或 manifest 的 `image:`，要自己跑。
+能擋這件事的是 `bin/assert-images.sh`，它只在 `task check:image` 跑，**push 時不會跑**：它要逐一連 registry 查映像，不是幾秒內跑得完的檢查。改了 `images:` 或 manifest 的 `image:`，要自己跑。
 
 ### `services/` 底下不要寫 `docker.io/` 字面值
 
@@ -100,7 +100,7 @@ vLLM 的 `--gpu-memory-utilization` 以整張卡為分母，同一張卡上所�
 
 ### litellm 改了，openwebui 要跟著跑 seed
 
-OpenWebUI 的系統提示詞、橫幅與語音開關由 `task seed SVC=openwebui` 寫進資料庫，不靠環境變數。litellm 新增模型後要再跑一次，新模型才會有系統提示詞。`task seed:check` 會列出沒套上系統提示詞的模型。
+OpenWebUI 的系統提示詞、橫幅與語音開關由 `task seed SVC=openwebui` 寫進資料庫，不靠環境變數。litellm 新增模型後要再跑一次，新模型才會有系統提示詞。`task check:seed` 會列出沒套上系統提示詞的模型。
 
 ### 自動分流與 DLP
 
@@ -111,7 +111,7 @@ OpenWebUI 的系統提示詞、橫幅與語音開關由 `task seed SVC=openwebui
 - **DLP 阻擋時回 200，不是錯誤。** 回應是一則以「DLP：請求含有…」開頭的合成回答，agent 看到的是一般回答。
 - **DLP 檢查整段對話。** 一段對話出現過個資，之後每一輪送雲端都會命中。email 規則也會命中程式碼裡的 git 位址。
 - **改了 `KEYWORDS` 或 `config.yaml`，要重新部署 litellm。** k8s 軌另跑 `kubectl rollout restart deployment/litellm`：ConfigMap 名稱不帶雜湊，`apply` 不會重啟 pod。
-- **LiteLLM 升版後要重跑 `task litellm:check`。** 沙箱的限制或 `inputs` 的欄位變了，不會報錯。
+- **LiteLLM 升版後要重跑 `task check:litellm`。** 沙箱的限制或 `inputs` 的欄位變了，不會報錯。
 
 ### LiteLLM 加 worker 或副本前，要先上 Redis
 
@@ -136,9 +136,9 @@ LiteLLM 現在只跑 1 個 worker 與 1 個副本，沒有 Redis。限流計數�
 ### 改了哪類檔要多驗什麼
 
 - 改了 manifest 或 `kustomization.yaml`：跑 `kubectl kustomize services/<svc>/k8s`，podman 軌同樣跑一次。先備好機密檔，見〈手動跑 `kubectl kustomize` 前，要先備好機密檔〉。
-- 改了 `images:` 或 manifest 的 `image:`：跑 `task image:check SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
+- 改了 `images:` 或 manifest 的 `image:`：跑 `task check:image SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
-- 重新部署 litellm 後：跑 `task litellm:check`。它呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
+- 重新部署 litellm 後：跑 `task check:litellm`。它呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
 - 改了 `.githooks/` 或 `bin/check-*.py`：照 `~/.claude/rules/githooks.md`〈改了 `.githooks/` 底下任何東西〉再跑一次真的 hook。手動跑時照 `~/.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
 
 ### `task test` 回 0 不等於每支都跑了

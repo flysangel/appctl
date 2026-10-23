@@ -6,12 +6,18 @@
 - 綠的層：`task doctor`、`task lint`、`task test`。
 - 已跑過 harness-adopt，`bin/check-docs.py` 與 `.githooks/` 是範本 repo 的新契約副本。
 - 已套用 `~/.claude/rules/directories.md`，例外列在 `docs/ARCHITECTURE.md`〈目錄結構〉。
-- `bin/check-taskfile.py` 目前會略過本 repo，因為本 repo 還沒套用 Taskfile〈分類原則〉，見〈待辦〉。
+- 已套用 `~/.claude/rules/taskfile.md`〈分類原則〉，`bin/check-taskfile.py` 驗過。
 - 已知壞掉：`litellm` 的 k8s 軌連不到地端模型，`vllm` 還沒有 k8s 軌，見〈待辦〉。
 - 未驗證：ncb 的憑證順序、`bin/svc.sh` 對 podman `delete` 的 exit 125 容錯、「拆 pod 留卷」的手動做法，見〈待辦〉。
 - blocker：沒有。
 
-## 2. 待辦
+## 2. 進行中
+
+- 這個分支：套用 Taskfile〈分類原則〉，gmm 的 seed 加確認。
+- 做到哪：實作、文件同步完成，`task lint` 與 `task test` 綠。
+- 下一步：整個分支的 code review，再 merge 回 main。
+
+## 3. 待辦
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
@@ -25,12 +31,11 @@
 - quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`task apply` 回來時 quay 還沒就緒
 - grafana 的 admin 密碼納入 `secret/secret.env`（`GF_SECURITY_ADMIN_PASSWORD`），不再用上游預設 admin/admin。做完改 `README.md`〈grafana 的第一次登入〉
 - 決定 ncb 的 certbot 容器去留：`server_name` 是 `ncb.local`，ACME 不簽，手放的憑證沒有 renewal 設定檔，`renew` 迴圈等於沒做事。拿掉容器，或改成公網網域（公網 DNS 不在本 repo 範圍）。做完改 `docs/ARCHITECTURE.md`〈已知的結構性限制〉ncb 那條與 `README.md`〈ncb 的憑證〉
-- 把 `AGENTS.md`〈真環境煙測要逐條手動跑〉的手動煙測清單寫成 podman 軌腳本（apply → 等 Running → 探測 → 登入 → 再 apply → delete → 確認 pod 與卷不在），一個服務失敗記錄後繼續跑下一個，結尾才決定退出碼；比照 `task litellm:check` 放進 Taskfile。做完改 `AGENTS.md`〈真環境煙測要逐條手動跑〉
+- 把 `AGENTS.md`〈真環境煙測要逐條手動跑〉的手動煙測清單寫成 podman 軌腳本（apply → 等 Running → 探測 → 登入 → 再 apply → delete → 確認 pod 與卷不在），一個服務失敗記錄後繼續跑下一個，結尾才決定退出碼；比照 `task check:litellm` 放進 Taskfile。做完改 `AGENTS.md`〈真環境煙測要逐條手動跑〉
 - `task test` 改成每支測試檔都要印 `ALL <n> PASS`，沒印就算失敗。現在漏寫 `__main__` 的測試檔零輸出、回 0，`task test` 會把它當成通過
 - `Taskfile.yaml` 的 `test` 改成自動收 `tests/test_*.py`，不逐行列檔。做完連同上一條，刪 `AGENTS.md`〈`task test` 回 0 不等於每支都跑了〉
 - 安裝 `yamllint`，對全部 `kustomization.yaml` 跑一次語法檢查
 - 做 `vllm` 的 k8s 軌：拆成一個 pod 一個容器，並打通聊天。k8s overlay 要改寫 litellm `config.yaml` 的 `api_base`（現在寫 podman 名，k8s 軌的本地別名連不到）
-- 套用 `~/.claude/rules/taskfile.md`〈分類原則〉：task 加角色標記、補 `dev`、`ops`、`release` 選單，讓 `bin/check-taskfile.py` 驗過
 
 **以下有觸發條件才做：**
 

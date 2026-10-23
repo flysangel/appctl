@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # live_gateway.py — 實機回歸：對執行中的 litellm 跑 DLP 與分流情境。
-# 不是離線測試：要先部署 litellm，由 task litellm:check 呼叫，不進 task test。
+# 不是離線測試：要先部署 litellm，由 task check:litellm 呼叫，不進 task test。
 # 檔名刻意不以 test_ 開頭，python3 -m pytest tests/ 不會收進來，也就不會打到正式服務。
 # key 從機密檔讀，不印出。每則印 [OK]／[FAIL]，全部跑完才決定退出碼，全部通過時是 0。
 import base64

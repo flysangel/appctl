@@ -7,7 +7,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mode="${1:-sync}"
 # 模型清單取自指定軌的渲染產物，各軌載的模型可以不同。
 # 所以不給預設軌，免得靜默下載錯的模型。
-track="${TRACK:?需傳 TRACK（用法：task seed SVC=vllm TRACK=<軌>，唯讀檢查用 task seed:check）}"
+track="${TRACK:?需傳 TRACK（用法：task seed SVC=vllm TRACK=<軌>，唯讀檢查用 task check:seed）}"
 
 case "${mode}" in
   sync|test) ;;
