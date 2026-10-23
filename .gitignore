@@ -47,7 +47,6 @@ services/*/secret/**
 
 # finetune 服務已移出版控：檔案只留在本機
 /services/finetune/
-/services/vllm/finetuned-4060ti/
 /tests/test_build_dataset.py
 /tests/test_slides_extract.py
 /tests/test_split_corpus.py

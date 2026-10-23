@@ -19,19 +19,15 @@
 | `iperf3` | 網路頻寬測試 server | ✓ | ✓ | 5201 | 無（無狀態） |
 | `juicefs` | JuiceFS 分散式檔案系統（S3-gateway 形態） | ✓ | ✓ | 9005 | obj、meta |
 | `kadm` | k8s 管理 SSH 堡壘（pod 內含 podman） | — | ✓ | 22100→22 | wk |
-| `litellm` | LLM 統一出口（litellm proxy 加 postgresql） | ✓ | ✓（連不到地端模型，見 [docs/PROGRESS.md](docs/PROGRESS.md)） | 4000 | db |
 | `minio` | S3 相容物件儲存 | ✓ | ✓ | 9000、9001 | podman：data；k8s：data0、data1 |
 | `ncb` | nginx 加 certbot 的 TLS 反向代理，上游是主機上的 minio 9000 | ✓ | — | 80、443 | certbot（`ncb-conf` 是 ConfigMap，不是卷） |
-| `openwebui` | Open WebUI 對話前端（webui 加 postgresql 含 pgvector，主資料庫兼向量庫） | ✓ | ✓ | 8080 | data、db |
 | `quay` | Project Quay 容器映像倉庫（quay-app、postgresql、redis） | ✓ | ✓ | 8080 | pg-data、quay-data |
 | `static-nginx` | 純靜態網頁 server | ✓ | ✓ | 80 | data |
-| `vllm` | 地端推論（vLLM，掛 GPU；chat、embed、rerank 同卡共存） | ✓ | — | 8000、8001、8002（不開 hostPort） | models |
 | `xadm-lxqt` | k8s 圖形管理工作站（LXQt via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
 | `xadm-xfce` | k8s 圖形管理工作站（XFCE4 via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
 
 - 埠是 podman 軌的 hostPort 與 k8s 的 Service 埠，卷的容量以 `services/<svc>/k8s/pvc.yaml` 為準（minio 在 `base/statefulset.yaml`）。同一台主機的 podman 軌，同埠的服務不能同時跑。
-- `vllm`、`litellm`、`openwebui` 的 podman 軌只有依主機分軌的目錄，`TRACK` 要填 `podman-4060ti` 這類名稱；填 `podman` 會被守衛擋下。
-- 服務只建一個軌的目錄，就代表另一軌不支援。`ncb` 在 k8s 沒有對應物：k8s 軌的 Ingress 都只有 HTTP，沒有 `tls:`，叢集也沒有 Issuer，TLS 要不要做歸 infra-k8s 決定；`kadm`、`xadm-*` 本來就是叢集內的管理工作站；`vllm` 的 k8s 軌還沒做。
+- 服務只建一個軌的目錄，就代表另一軌不支援。`ncb` 在 k8s 沒有對應物：k8s 軌的 Ingress 都只有 HTTP，沒有 `tls:`，叢集也沒有 Issuer，TLS 要不要做歸 infra-k8s 決定；`kadm`、`xadm-*` 本來就是叢集內的管理工作站。
 - 每個服務的工作負載正本在 `services/<svc>/base/`，兩軌的目錄只放各自的差異（podman 的 hostPort、k8s 的 Service、Ingress、PVC）。`minio` 是例外，原因見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈已知的結構性限制〉。
 - k8s 軌的 Ingress 主機名一律是 `<svc>.local`。有沒有 Ingress，看 `services/<svc>/k8s/ingress.yaml` 在不在。
 
@@ -48,7 +44,6 @@
 | `podman` 與 `sudo` | podman 軌部署。podman 軌是 rootful，查狀態與 log 也要 `sudo`；沒有 tty 時先 `sudo -v` | 走 podman 軌時 |
 | `python3` 與 PyYAML | 單元測試、`manifest-diff`、`task lint` 的四大文件與 Taskfile 檢查 | 必要 |
 | `skopeo` | `task check:image` 查映像是否還在來源 registry | 用到時 |
-| NVIDIA 驅動、container toolkit（CDI）、podman 5.7.0 | `vllm` 的 podman 軌掛 GPU；`nvidia-ctk cdi list` 要看得到 `nvidia.com/gpu=all`。podman 4.9.3 掛不到 GPU | 部署 `vllm` 時 |
 | `jq`、`curl`、`nmap` | `task seed` 營運工具 | 用到時 |
 | `shellcheck` | `task lint` 的靜態檢查 | 必要 |
 | `gitleaks` | push 護欄的機密掃描 | 必要 |
@@ -74,22 +69,12 @@ cp services/quay/secret/config.yaml.example services/quay/secret/config.yaml    
 ```bash
 # 部署
 task apply SVC=<svc> TRACK=podman                    # podman 軌
-# vllm、litellm、openwebui 的 podman 軌依主機分軌，實驗室用 TRACK=podman-4060ti
 KUBECONFIG=<叢集設定檔> task apply SVC=<svc> TRACK=k8s   # k8s 軌
 
 # 拆除（不可逆，見〈拆除與暫停〉）
 task delete SVC=<svc> TRACK=podman
 KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 ```
-
-### litellm 的模型清單與 DLP
-
-`litellm` 的模型清單是 `services/litellm/base/config.yaml`，整份進版控，不必複製。
-
-- k8s 軌改完這個檔，要另跑 `kubectl rollout restart deployment/litellm`：ConfigMap 名稱不帶雜湊，`apply` 不會重啟 pod。
-- 雲端來源的金鑰填進 `services/litellm/secret/secret.env`，值不加引號。kustomize 會把引號當成值的一部分。
-- DLP 用 LiteLLM 內建的 guardrail，寫在 `config.yaml` 檔尾的 `guardrails`。公司自訂關鍵字改 `tw-dlp` 程式裡的 `KEYWORDS`，改完重新部署 `litellm` 才生效。
-- 直接指定雲端別名時，`tw-dlp` 阻擋含個資或圖片的請求。網頁聊天的 `chat-auto` 帶個資或圖片時，改由地端回答。
 
 ### ncb 的憑證
 
@@ -112,13 +97,9 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 
 `grafana` 沒設 `GF_SECURITY_ADMIN_*`，第一次登入用上游預設的 `admin`／`admin`。podman 軌一 `apply` 3000 埠就對網段開放，apply 完立刻登入改掉。
 
-### 實驗室的連線方式
+### 網段開放
 
-`litellm`、`openwebui` 的 podman 軌綁主機的所有介面，實驗室網段的其他主機都連得到。網頁開 `http://<主機位址>:8080`，agent 連 `http://<主機位址>:4000`，實驗室主機是 172.20.1.192。
-
-- 連線是 HTTP 明文，主機沒有另設防火牆。其他有 hostPort 的服務同樣綁全部介面、同樣明文，埠見服務一覽表。
-- OpenWebUI 開放註冊，新帳號要 admin 核准才能聊天。
-- `vllm` 不開 hostPort，`litellm` 經 pod 網路用 `vllm-pod` 連進來。podman 的 kube 網路沒有隔離，同網路的 pod 與主機本身都連得到 `vllm`；從主機的對外位址連不到。
+podman 軌的 hostPort 綁主機的所有介面，同網段的其他主機都連得到。連線是 HTTP 明文，主機沒有另設防火牆，埠見服務一覽表。
 
 `task dev` 列出開發用的 task，`task ops` 列出維運用的 task，`task --list-all` 列出全部 task。改完要跑哪些檢查，見 [AGENTS.md](AGENTS.md)〈完成定義〉。
 
@@ -132,15 +113,6 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 cp services/gmm/sync.secret.env.example services/gmm/sync.secret.env     # guacadmin 密碼
 cp services/gmm/mapping.env.example services/gmm/mapping.env             # 連線清單（pipe 分隔，欄位照 mapping.env.example）
 task seed SVC=gmm                                                        # 唯讀檢查用 task check:seed，只驗 token、不驗 mapping.env、不寫入
-
-# openwebui：種下第一位 admin。podman 軌一 apply 就對網段開放，apply 完立刻 seed，縮短沒有 admin 的空窗。
-# 同一支還會寫入每個模型的系統提示詞（system-prompt.txt）與常駐橫幅（banner.txt）。
-# 語音開關照 sync.conf 的 VOICE_ENABLED 設。litellm 新增模型後要再跑一次
-cp services/openwebui/sync.secret.env.example services/openwebui/sync.secret.env
-task seed SVC=openwebui                                                  # 唯讀檢查用 task check:seed，只驗 admin、系統提示詞、橫幅與語音開關，不寫入
-
-# vllm：部署前先下載模型權重進具名卷（容器以離線模式啟動，卷裡沒有權重就起不來）。模型清單依軌而定，TRACK 必填
-task seed SVC=vllm TRACK=podman-4060ti                                   # 唯讀檢查用 task check:seed，只查權重在不在、不下載
 ```
 
 **`task seed SVC=gmm` 有破壞性**：它會刪除 `mapping.env` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。動資料前，腳本要求輸入服務名 `gmm`。沒有 tty 時，腳本中止，什麼都不刪。它的行為：
@@ -177,38 +149,6 @@ task check:image SVC=<svc>   # 渲染產物的每個 image 都解析成完整參
 - k8s 軌：`kubectl scale -n <ns> --replicas=0 deployment/<name>`；`minio` 是 `statefulset/minio`。`DaemonSet`（例如 `iperf3`）沒有 `replicas` 欄位，要停只能 `delete`。
 - podman 軌：`sudo podman pod stop <svc>-pod`。`kube play` 吃 `Deployment`、`DaemonSet` 時 pod 名帶 `-pod` 後綴；`ncb` 與 `minio` 仍是 `<svc>`。
 - 恢復一律用 `task apply`。
-
-### coding agent 接 LiteLLM（發個人 key）
-
-開發者的 coding agent 用個人 key 經 LiteLLM 連模型，請求紀錄會歸到那把 key。agent 自己選模型，不經自動分流。範例都在 `services/litellm/agents/`。範例裡的位址是主機本機的 `127.0.0.1`；agent 在實驗室網段的其他主機跑時，換成主機位址。
-
-管理員發 key 與停用 key：
-
-```bash
-# master key 在 services/litellm/secret/secret.env，先載進環境變數，不要貼進命令列
-set -a; . services/litellm/secret/secret.env; set +a
-
-# 發 key：key_alias 用 user-<帳號>，user_id 填 email。回應的 key 連同告知文字 key-notice.txt 一起交給使用者
-curl -s http://127.0.0.1:4000/key/generate -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" -H 'Content-Type: application/json' \
-  -d '{"key_alias":"user-<帳號>","user_id":"<email>"}' | jq -r .key
-
-# 停用：先用 key_alias 查出雜湊值。停用後這把 key 的請求回 401。要恢復時，同樣的指令改打 /key/unblock
-KEY_HASH="$(curl -s 'http://127.0.0.1:4000/key/list?key_alias=user-<帳號>&return_full_object=true' -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" | jq -r '.keys[0].token')"
-curl -s -X POST http://127.0.0.1:4000/key/block -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" -H 'Content-Type: application/json' -d "{\"key\":\"${KEY_HASH}\"}"
-```
-
-使用者設定 agent。Claude Code 先看這則警語：
-
-> **Claude Code 的網址與個人 key 要寫在同一個檔、同時設定。** 只設 `ANTHROPIC_BASE_URL` 時，Claude Code 會拿登入的個人訂閱憑證連 LiteLLM，憑證就經過了 LiteLLM。兩個值都寫進 `settings.local.json`，這個檔要列在 `.gitignore` 裡。網址不要單獨寫進團隊共用的 `.claude/settings.json`。開 Claude Code 後跑 `/status`，`Auth token` 那一行要寫 `ANTHROPIC_AUTH_TOKEN`。
-
-| agent | 設定檔放哪裡 | 範例 |
-|---|---|---|
-| OpenCode | 專案根目錄的 `opencode.json`。個人 key 放環境變數 `LITELLM_API_KEY` | `services/litellm/agents/opencode.json` |
-| Claude Code | 專案的 `.claude/settings.local.json` | `services/litellm/agents/claude-settings.local.json` |
-
-- OpenCode 範例只開 LiteLLM 一個來源，分享與自動更新都關閉。產生標題這類小任務固定用 `chat-local`。`limit.context` 要跟模型實際的長度一致：`chat-local` 對 vLLM 的 `--max-model-len`，`chat-cloud` 取自 Cloudflare 的模型資訊。
-- Claude Code 範例是給付費的雲端 Claude 用的。Claude 的別名要等正式環境改接 Google Cloud 才設，實驗室沒有。LiteLLM 目前不擋 Claude Code 選非 Claude 的別名，官方也不支援這種用法。
-- OpenCode 會讀專案的 `.claude/skills/`，也會讀家目錄的 `~/.claude/skills/`。家目錄裡個人 skill 的名稱，會隨每次請求送給選用的模型，選雲端時也一樣。
 
 ## 3. 文件導覽
 
