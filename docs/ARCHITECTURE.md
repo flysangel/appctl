@@ -17,7 +17,7 @@
 ## 2. 目錄結構
 
 ```
-Taskfile.yaml              唯一入口，task --list-all 列清單
+Taskfile.yaml              唯一入口，task 印角色選單，task --list-all 列全部
 LICENSE                    Apache License 2.0 全文
 
 bin/
@@ -26,7 +26,7 @@ bin/
   manifest-diff.py         語意零漂移比對器（大改時用，不在日常流程）
 
 .gitattributes             腳本強制 LF
-tests/                     離線單元測試，加上 live_gateway.py（litellm 實機回歸，task litellm:check 呼叫）
+tests/                     離線單元測試，加上 live_gateway.py（litellm 實機回歸，task check:litellm 呼叫）
 
 services/<svc>/
   base/                    工作負載正本，兩軌共用；檔名是 kind 小寫
@@ -141,7 +141,7 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 | 動詞只有 `apply`、`delete`，不提供 `stop` | 命令式的暫停會讓叢集實況與 manifest 正本分岔，下次 `apply` 會靜默把服務拉回 | 要暫停得退回原生工具（`kubectl scale --replicas=0`、`podman pod stop <svc>-pod`）；`delete` 連卷刪，沒有「拆 pod 留卷」的動詞，要留卷只能繞過 `task`（待驗的做法列在 `docs/PROGRESS.md`） | `tests/test_svc.py` 的 `test_bad_verb_and_bad_track_fail` 擋下 `bin/svc.sh` 收其他動詞 |
 | 工作負載收在共用 `base/`，兩軌只寫差異 | 兩軌對齊 kind 後，kustomize 原生的 base 與 overlay 就抽得乾淨，不需要自訂抽象；版號每個服務只寫一處 | `minio` 對不齊（見〈已知的結構性限制〉）；podman 軌的 `hostPort` 要靠 overlay patch 帶入 | 無程式擋 |
 | 映像參照直接寫在 `images:`，不做 `${REGISTRY_PREFIX}` 間接層，也不經 `envsubst` | 零字串替換，正本可以直接 `kubectl apply -k`；佔位用途只有 image 與 namespace，kustomize 原生欄位全部涵蓋 | 換 registry 要改每個服務的 `images:`；ncb 的 `server_name`、憑證路徑、上游三處寫死在 `default.conf`，只服務一個網域，多站要複製 server 區塊 | 無程式擋 |
-| manifest 只寫短名，短名一律帶服務名 | 帶服務名的短名在 Docker Hub 官方庫都不存在，`images:` 漏列時一定失敗；規則沒有例外，不需要 lint 來擋 | `grafana-grafana`、`quay-quay-app` 這類重複字樣讀起來笨拙 | `task image:check` 只擋沒換成完整參照的短名；短名帶不帶服務名，無程式擋 |
+| manifest 只寫短名，短名一律帶服務名 | 帶服務名的短名在 Docker Hub 官方庫都不存在，`images:` 漏列時一定失敗；規則沒有例外，不需要 lint 來擋 | `grafana-grafana`、`quay-quay-app` 這類重複字樣讀起來笨拙 | `task check:image` 只擋沒換成完整參照的短名；短名帶不帶服務名，無程式擋 |
 | 機密用 `secretGenerator` 宣告在 `secret/`，兩軌共用 | `apply -k`、`delete -k` 直接涵蓋 Secret，腳本不必自己建、自己刪 | 真值檔不在時整個部署流程（含純本地 `kubectl kustomize`）都失敗，要靠 `.example` 佔位值補位 | 無程式擋 |
 | Secret 與 ConfigMap 名稱不加內容雜湊 | podman 的 secret store 沒有 owner reference 與 GC，雜湊輪替會留下永久孤兒；`delete -k` 也只刪得掉當下那個雜湊 | k8s 軌改機密或設定不會觸發滾動更新，要手動 `rollout restart`；podman 軌每次 `apply` 都 `--replace` 重建 pod，沒有這個問題。雜湊政策寫在共用的 `secret/`，不能分軌設定 | 無程式擋 |
 | quay 的 `config.yaml` 不進版控 | `secretGenerator` 的 `files:` 不做變數替換，含密碼的設定檔只能整份當真值檔維護 | 換機器要照 `.example` 手抄並填回機密欄位；`.example` 補位只保證跑得起來，不保證跑得對 | 無程式擋 |
@@ -150,8 +150,8 @@ litellm 的 `config.yaml` 不含機密：金鑰都寫成 `os.environ/` 參照，
 | 映像優先用 tag 釘，不用 digest | 和其他服務的寫法一致，比較好讀 | 同一個 tag 可能被重推，不像 digest 保證不可變；全部容器 `imagePullPolicy: IfNotPresent`，同 tag 重推後已有快取的節點或 podman 主機不會重拉，`apply` 成功但跑的是舊層，要清本機映像或改版號。minio 與 juicefs 還是 digest，因為 mirror 沒有版本 tag | 無程式擋 |
 | push 護欄是黑名單、盡力而為的第二道防線 | 主防線是真值與浮動參照不寫進版控；黑名單只能擋已知的樣式 | 沒列進黑名單的寫法擋不到 | `.githooks/pre-push` 的 forbidden 掃描本身 |
 | `assert-images.sh` 放在 `bin/`，不進 push 護欄 | `pre-push` 只放幾秒內跑得完的檢查。它要逐一連 registry 查映像；`pre-push` 展開的樹也沒有 `secret.env`，有機密的服務在 kustomize 就失敗 | 這道守衛靠人記得跑，不是靠機制 | 無程式擋 |
-| 自動分流用 LiteLLM 內建的 `complexity_router`，由 `chat-local` 用 LLM 判斷難度 | 實測 LLM 判斷比 heuristic 加中文關鍵字準：heuristic 沒命中關鍵字的困難題都留在地端 | 分流不看圖片；知識庫聊天整段送去判斷；MEDIUM 送地端，部分困難題會留在地端；判斷由 LiteLLM 內部發出，升版要重驗 | `task litellm:check` 的分流情境，要部署 litellm |
-| DLP 用 LiteLLM 內建的 guardrail：`custom_code` 的 `tw-dlp`，只綁在雲端別名上 | 實測多個候選，只有模型層 guardrail 沒有外洩，也不會連送地端的請求一起擋；fallback 到雲端時也會檢查。內建的 `content_filter` 不收 `structured_messages`，漏掉 `/v1/responses` 的 `instructions`；只看 `model` 決定要不要檢查的寫法，擋不住 fallback 到雲端的那一次 | 阻擋時回 200 加合成回答，不是錯誤；`chat-auto` 改由地端回答時沒有提示；新增雲端模型忘了綁就不檢查 | `task litellm:check` 的 DLP 情境，要部署 litellm；新增雲端模型忘了綁，無程式擋 |
+| 自動分流用 LiteLLM 內建的 `complexity_router`，由 `chat-local` 用 LLM 判斷難度 | 實測 LLM 判斷比 heuristic 加中文關鍵字準：heuristic 沒命中關鍵字的困難題都留在地端 | 分流不看圖片；知識庫聊天整段送去判斷；MEDIUM 送地端，部分困難題會留在地端；判斷由 LiteLLM 內部發出，升版要重驗 | `task check:litellm` 的分流情境，要部署 litellm |
+| DLP 用 LiteLLM 內建的 guardrail：`custom_code` 的 `tw-dlp`，只綁在雲端別名上 | 實測多個候選，只有模型層 guardrail 沒有外洩，也不會連送地端的請求一起擋；fallback 到雲端時也會檢查。內建的 `content_filter` 不收 `structured_messages`，漏掉 `/v1/responses` 的 `instructions`；只看 `model` 決定要不要檢查的寫法，擋不住 fallback 到雲端的那一次 | 阻擋時回 200 加合成回答，不是錯誤；`chat-auto` 改由地端回答時沒有提示；新增雲端模型忘了綁就不檢查 | `task check:litellm` 的 DLP 情境，要部署 litellm；新增雲端模型忘了綁，無程式擋 |
 | podman 軌的 hostPort 都不設 hostIP，綁主機全部介面，對實驗室網段開放 | 實驗室其他主機要直接用網頁與 agent（litellm、openwebui）；manifest 不寫死主機 IP，換主機照用 | 每個 hostPort 都是 HTTP 明文：`/ui` 的 master key、gmm 的登入密碼與遠端桌面帳密都明文傳送；主機沒有防火牆，連得到主機的網段都能連每個 hostPort | 無程式擋 |
 | LiteLLM 不上 Redis，只跑 1 個 worker 與 1 個副本 | 限流、預算與路由狀態要加 worker 或副本才需要共用；LiteLLM 只轉送請求，推論在 vLLM，加了也不會變快 | 重新部署 LiteLLM 時服務中斷，沒有零停機 | 無程式擋 |
 | 動詞固定（清單用 `task --list-all` 查），服務與軌用 `SVC=`、`TRACK=` 帶入，不每服務開一份 taskfile | 服務多了 taskfile 不會跟著長；`includes` 與 `dir:` 的路徑坑一次都不用踩 | `task --list-all` 看不出有哪些服務，要 `ls services/` | 無程式擋 |

@@ -47,7 +47,7 @@
 | `kubectl` | 渲染（內建 kustomize）與 k8s 部署 | 必要，podman 軌也要用它渲染 |
 | `podman` 與 `sudo` | podman 軌部署。podman 軌是 rootful，查狀態與 log 也要 `sudo`；沒有 tty 時先 `sudo -v` | 走 podman 軌時 |
 | `python3` 與 PyYAML | 單元測試、`manifest-diff`、`task lint` 的四大文件與 Taskfile 檢查 | 必要 |
-| `skopeo` | `task image:check` 查映像是否還在來源 registry | 用到時 |
+| `skopeo` | `task check:image` 查映像是否還在來源 registry | 用到時 |
 | NVIDIA 驅動、container toolkit（CDI）、podman 5.7.0 | `vllm` 的 podman 軌掛 GPU；`nvidia-ctk cdi list` 要看得到 `nvidia.com/gpu=all`。podman 4.9.3 掛不到 GPU | 部署 `vllm` 時 |
 | `jq`、`curl`、`nmap` | `task seed` 營運工具 | 用到時 |
 | `shellcheck` | `task lint` 的靜態檢查 | 必要 |
@@ -120,7 +120,7 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 - OpenWebUI 開放註冊，新帳號要 admin 核准才能聊天。
 - `vllm` 不開 hostPort，`litellm` 經 pod 網路用 `vllm-pod` 連進來。podman 的 kube 網路沒有隔離，同網路的 pod 與主機本身都連得到 `vllm`；從主機的對外位址連不到。
 
-`task --list-all` 列出全部 task。改完要跑哪些檢查，見 [AGENTS.md](AGENTS.md)〈完成定義〉。
+`task dev` 列出開發用的 task，`task ops` 列出維運用的 task，`task --list-all` 列出全部 task。改完要跑哪些檢查，見 [AGENTS.md](AGENTS.md)〈完成定義〉。
 
 ### 營運同步（`task seed`）
 
@@ -131,19 +131,19 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 # services/gmm/sync.conf 已進版控，放連線目標與非機密參數。跑 k8s 軌時，改它的 GUACAMOLE_SERVER
 cp services/gmm/sync.secret.env.example services/gmm/sync.secret.env     # guacadmin 密碼
 cp services/gmm/mapping.env.example services/gmm/mapping.env             # 連線清單（pipe 分隔，欄位照 mapping.env.example）
-task seed SVC=gmm                                                        # 唯讀檢查用 task seed:check，只驗 token、不驗 mapping.env、不寫入
+task seed SVC=gmm                                                        # 唯讀檢查用 task check:seed，只驗 token、不驗 mapping.env、不寫入
 
 # openwebui：種下第一位 admin。podman 軌一 apply 就對網段開放，apply 完立刻 seed，縮短沒有 admin 的空窗。
 # 同一支還會寫入每個模型的系統提示詞（system-prompt.txt）與常駐橫幅（banner.txt）。
 # 語音開關照 sync.conf 的 VOICE_ENABLED 設。litellm 新增模型後要再跑一次
 cp services/openwebui/sync.secret.env.example services/openwebui/sync.secret.env
-task seed SVC=openwebui                                                  # 唯讀檢查用 task seed:check，只驗 admin、系統提示詞、橫幅與語音開關，不寫入
+task seed SVC=openwebui                                                  # 唯讀檢查用 task check:seed，只驗 admin、系統提示詞、橫幅與語音開關，不寫入
 
 # vllm：部署前先下載模型權重進具名卷（容器以離線模式啟動，卷裡沒有權重就起不來）。模型清單依軌而定，TRACK 必填
-task seed SVC=vllm TRACK=podman-4060ti                                   # 唯讀檢查用 task seed:check，只查權重在不在、不下載
+task seed SVC=vllm TRACK=podman-4060ti                                   # 唯讀檢查用 task check:seed，只查權重在不在、不下載
 ```
 
-**`task seed SVC=gmm` 有破壞性**：它會刪除 `mapping.env` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。它的行為：
+**`task seed SVC=gmm` 有破壞性**：它會刪除 `mapping.env` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。動資料前，腳本要求輸入服務名 `gmm`。沒有 tty 時，腳本中止，什麼都不刪。它的行為：
 
 - `GUACAMOLE_SERVER` 要含 webapp 路徑 `/guacamole`。k8s 軌先 `kubectl port-forward svc/gmm 8080`，再把 URL 填進 `sync.conf`。
 - guacadmin 的初始密碼由 mariadb 映像內建的 schema 決定。第一次登入後在 UI 改掉，`sync.secret.env` 要跟著改，否則取 token 失敗。
@@ -157,7 +157,7 @@ task seed SVC=vllm TRACK=podman-4060ti                                   # 唯�
 ### 查映像
 
 ```bash
-task image:check SVC=<svc>   # 渲染產物的每個 image 都解析成完整參照，而且還在來源 registry
+task check:image SVC=<svc>   # 渲染產物的每個 image 都解析成完整參照，而且還在來源 registry
 ```
 
 ### 拆除與暫停
