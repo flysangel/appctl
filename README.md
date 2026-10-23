@@ -128,15 +128,14 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 
 ```bash
 # gmm：佈建 guacamole 連線
-cp services/gmm/sync.conf.example services/gmm/sync.conf                 # 連線目標與非機密參數
+# services/gmm/sync.conf 進版控：連線目標與非機密參數，k8s 軌要改 GUACAMOLE_SERVER
 cp services/gmm/sync.secret.env.example services/gmm/sync.secret.env     # guacadmin 密碼
-cp services/gmm/mapping.list.example services/gmm/mapping.list           # 連線清單（pipe 分隔，欄位照 mapping.list.example）
-task seed SVC=gmm                                                        # 唯讀檢查用 task seed:check，只驗 token、不驗 mapping.list、不寫入
+cp services/gmm/mapping.env.example services/gmm/mapping.env             # 連線清單（pipe 分隔，欄位照 mapping.env.example）
+task seed SVC=gmm                                                        # 唯讀檢查用 task seed:check，只驗 token、不驗 mapping.env、不寫入
 
 # openwebui：種下第一位 admin。podman 軌一 apply 就對網段開放，apply 完立刻 seed，縮短沒有 admin 的空窗。
 # 同一支還會寫入每個模型的系統提示詞（system-prompt.txt）與常駐橫幅（banner.txt）。
 # 語音開關照 sync.conf 的 VOICE_ENABLED 設。litellm 新增模型後要再跑一次
-cp services/openwebui/sync.conf.example services/openwebui/sync.conf
 cp services/openwebui/sync.secret.env.example services/openwebui/sync.secret.env
 task seed SVC=openwebui                                                  # 唯讀檢查用 task seed:check，只驗 admin、系統提示詞、橫幅與語音開關，不寫入
 
@@ -144,7 +143,7 @@ task seed SVC=openwebui                                                  # 唯�
 task seed SVC=vllm TRACK=podman-4060ti                                   # 唯讀檢查用 task seed:check，只查權重在不在、不下載
 ```
 
-**`task seed SVC=gmm` 有破壞性**：它會刪除 `mapping.list` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。它的行為：
+**`task seed SVC=gmm` 有破壞性**：它會刪除 `mapping.env` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。它的行為：
 
 - `GUACAMOLE_SERVER` 要含 webapp 路徑 `/guacamole`。k8s 軌先 `kubectl port-forward svc/gmm 8080`，再把 URL 填進 `sync.conf`。
 - guacadmin 的初始密碼由 mariadb 映像內建的 schema 決定。第一次登入後在 UI 改掉，`sync.secret.env` 要跟著改，否則取 token 失敗。
@@ -204,8 +203,8 @@ curl -s -X POST http://127.0.0.1:4000/key/block -H "Authorization: Bearer ${LITE
 
 | agent | 設定檔放哪裡 | 範例 |
 |---|---|---|
-| OpenCode | 專案根目錄的 `opencode.json`。個人 key 放環境變數 `LITELLM_API_KEY` | `opencode.json.example` |
-| Claude Code | 專案的 `.claude/settings.local.json` | `claude-settings.local.json.example` |
+| OpenCode | 專案根目錄的 `opencode.json`。個人 key 放環境變數 `LITELLM_API_KEY` | `services/litellm/agents/opencode.json` |
+| Claude Code | 專案的 `.claude/settings.local.json` | `services/litellm/agents/claude-settings.local.json` |
 
 - OpenCode 範例只開 LiteLLM 一個來源，分享與自動更新都關閉。產生標題這類小任務固定用 `chat-local`。`limit.context` 要跟模型實際的長度一致：`chat-local` 對 vLLM 的 `--max-model-len`，`chat-cloud` 取自 Cloudflare 的模型資訊。
 - Claude Code 範例是給付費的雲端 Claude 用的。Claude 的別名要等正式環境改接 Google Cloud 才設，實驗室沒有。LiteLLM 目前不擋 Claude Code 選非 Claude 的別名，官方也不支援這種用法。
@@ -235,4 +234,4 @@ spec、plan、工單放在 `docs/superpowers/` 與 `docs/tickets/`，只存本�
 
 ## 5. 授權
 
-本 repo 是個人平台，不對外授權，所以沒有授權檔。
+Apache License 2.0，全文見 [LICENSE](LICENSE)。

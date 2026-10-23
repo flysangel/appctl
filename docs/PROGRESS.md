@@ -5,6 +5,7 @@
 - 標準驗證路徑：`task doctor` → `task lint` → `task test`。真環境驗證照 `AGENTS.md`〈完成定義〉的 L3，要部署服務。
 - 綠的層：`task doctor`、`task lint`、`task test`。
 - 已跑過 harness-adopt，`bin/check-docs.py` 與 `.githooks/` 是範本 repo 的新契約副本。
+- 已套用 `~/.claude/rules/directories.md`，例外列在 `docs/ARCHITECTURE.md`〈目錄結構〉。
 - `bin/check-taskfile.py` 目前會略過本 repo，因為本 repo 還沒套用 Taskfile〈分類原則〉，見〈待辦〉。
 - 已知壞掉：`litellm` 的 k8s 軌連不到地端模型，`vllm` 還沒有 k8s 軌，見〈待辦〉。
 - 未驗證：ncb 的憑證順序、`bin/svc.sh` 對 podman `delete` 的 exit 125 容錯、「拆 pod 留卷」的手動做法，見〈待辦〉。
@@ -18,7 +19,7 @@
 - 加一道檢查，比對 quay 兩處的值：`secret.env` 的 `DB_PASSWORD`、`REDIS_PASSWORD` 對 `config.yaml` 的 `DB_URI`、`BUILDLOGS_REDIS`、`USER_EVENTS_REDIS`；`deployment.yaml` 的 `POSTGRES_USER`、`POSTGRES_DB` 對 `DB_URI` 的帳號與庫名。不一致時渲染與 `apply` 都成功，quay 起得來但連不上 DB；檢查不能印出值
 - 決定 quay `secret.env` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 去留：沒有容器引用它們，quay 讀的是 `config.yaml` 內的同名鍵，兩處各自漂移。拿掉，或讓上面那條檢查也比對這兩鍵
 - `services/gmm/sync.sh` 把 `GUACAMOLE_PASS` 放進 curl 的 `--data-urlencode`、把 token 放進 `?token=`、把目標主機密碼放進 `--data-raw`，三者都進 argv，`ps` 看得到，違反 `AGENTS.md`〈不要做的事〉。改成 `Guacamole-Token` 標頭（映像內的 guacamole 1.6.0 支援），密碼與 JSON 改經 stdin 或 `curl -K -` 餵
-- `services/gmm/sync.sh` 不看任何 API 回應，永遠以 0 結束。改成檢查每次 curl 的 HTTP 狀態碼，失敗計數後以非零結束；mapping 行解析失敗時中止、不進 cleanup；`sync.sh test` 加 `mapping.list` 存在與欄數檢查。做完改 `AGENTS.md`〈會刪資料的動作，先問使用者〉gmm 那條與 `README.md`〈營運同步（`task seed`）〉最後一條
+- `services/gmm/sync.sh` 不看任何 API 回應，永遠以 0 結束。改成檢查每次 curl 的 HTTP 狀態碼，失敗計數後以非零結束；mapping 行解析失敗時中止、不進 cleanup；`sync.sh test` 加 `mapping.env` 存在與欄數檢查。做完改 `AGENTS.md`〈會刪資料的動作，先問使用者〉gmm 那條與 `README.md`〈營運同步（`task seed`）〉最後一條
 - 補 `services/quay/sync.sh` 種第一位 superuser（等 `/health/instance` 回 200 後 `POST /api/v1/user/initialize`），讓 `task seed SVC=quay` 接手 `README.md`〈quay 的第一位 superuser〉的手動步驟
 - `services/quay/k8s/ingress.yaml` 補 `nginx.ingress.kubernetes.io/proxy-body-size`：ingress-nginx 文件的預設 body 上限是 1m，推映像層會 413；infra-k8s 的 ingress addon 沒有全域設定
 - quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`task apply` 回來時 quay 還沒就緒

@@ -21,7 +21,7 @@
 
 ### 機密真值檔就在本機磁碟上
 
-有機密的服務（`ls services/*/secret/secret.env.example`），同目錄的 `secret.env` 存在且含真值，靠 `.gitignore` 擋住。quay 另有 `secret/config.yaml`，`gmm` 與 `openwebui` 另有 `sync.secret.env`。gmm 還有兩個：`mapping.list` 含目標主機的明文帳密，`random.csv` 是 seed 自動產生的使用者密碼，唯一留存處。
+有機密的服務（`ls services/*/secret/secret.env.example`），同目錄的 `secret.env` 存在且含真值，靠 `.gitignore` 擋住。quay 另有 `secret/config.yaml`，`gmm` 與 `openwebui` 另有 `sync.secret.env`。gmm 還有兩個：`mapping.env` 含目標主機的明文帳密，`random.csv` 是 seed 自動產生的使用者密碼，唯一留存處。
 
 - 不要 `cat` 它們，不要把內容貼進任何輸出，不要 `git add -f`。
 - 要知道有哪些鍵，讀同目錄的 `.example`。
@@ -29,7 +29,7 @@
 ### 會刪資料的動作，先問使用者
 
 - `task delete`：k8s 軌連 manifest 內宣告的 PVC 一起刪，叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料跟著消失；podman 軌連具名卷一起移除。
-- `task seed SVC=gmm`：刪除 `mapping.list` 以外多餘的 user、group、connection。欄數不對的行會印 `Error` 跳過，但 cleanup 照跑，那一行的 user、group、connection 也算「以外」，一起被刪；`task seed:check` 不驗 `mapping.list`。改成解析失敗就中止列在 `docs/PROGRESS.md`。
+- `task seed SVC=gmm`：刪除 `mapping.env` 以外多餘的 user、group、connection。欄數不對的行會印 `Error` 跳過，但 cleanup 照跑，那一行的 user、group、connection 也算「以外」，一起被刪；`task seed:check` 不驗 `mapping.env`。改成解析失敗就中止列在 `docs/PROGRESS.md`。
 - `task delete SVC=ncb TRACK=podman`：連 `ncb-certbot` 卷刪掉，憑證一起消失。Let's Encrypt 的 rate limits 文件寫同一組網域每 7 天只簽 5 張重複憑證，刪了再簽會撞上限。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 是叢集最高權服務，帳密不能輪換。要部署前，先確認網段隔離。
 

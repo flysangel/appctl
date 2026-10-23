@@ -13,7 +13,7 @@ case "${mode}" in
   *) echo "Error: 用法 bash sync.sh [sync|test]" >&2; exit 1 ;;
 esac
 for cmd in jq curl; do command -v "${cmd}" >/dev/null || { echo "Error: 缺 ${cmd}" >&2; exit 1; }; done
-[[ -f "${here}/sync.conf" ]] || { echo "Error: ${here}/sync.conf 不存在（cp sync.conf.example sync.conf 後填）" >&2; exit 1; }
+[[ -f "${here}/sync.conf" ]] || { echo "Error: ${here}/sync.conf 不存在（它進版控，從 repo 還原）" >&2; exit 1; }
 # shellcheck source=/dev/null
 source "${here}/sync.conf"
 [[ -f "${here}/sync.secret.env" ]] || { echo "Error: ${here}/sync.secret.env 不存在（cp sync.secret.env.example sync.secret.env 後填）" >&2; exit 1; }
