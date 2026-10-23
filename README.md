@@ -128,7 +128,7 @@ KUBECONFIG=<叢集設定檔> task delete SVC=<svc> TRACK=k8s
 
 ```bash
 # gmm：佈建 guacamole 連線
-# services/gmm/sync.conf 進版控：連線目標與非機密參數，k8s 軌要改 GUACAMOLE_SERVER
+# services/gmm/sync.conf 已進版控，放連線目標與非機密參數。跑 k8s 軌時，改它的 GUACAMOLE_SERVER
 cp services/gmm/sync.secret.env.example services/gmm/sync.secret.env     # guacadmin 密碼
 cp services/gmm/mapping.env.example services/gmm/mapping.env             # 連線清單（pipe 分隔，欄位照 mapping.env.example）
 task seed SVC=gmm                                                        # 唯讀檢查用 task seed:check，只驗 token、不驗 mapping.env、不寫入
