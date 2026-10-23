@@ -5,16 +5,27 @@ set: [errexit, nounset, pipefail]
 tasks:
   default:
     cmds:
-      - task --list-all
+      - echo 'task dev   開發'
+      - echo 'task ops   維運'
+    silent: true
+
+  dev:
+    cmds:
+      - task --list-all | grep -F "[開發]"
+    silent: true
+
+  ops:
+    cmds:
+      - task --list-all | grep -F "[維運]"
     silent: true
 
   doctor:
-    desc: 檢查執行環境：命令存在與種類、core.hooksPath 來源，不安裝
+    desc: "[開發] 檢查執行環境：命令存在與種類、core.hooksPath 來源，不安裝"
     cmds:
       - bash bin/doctor.sh
 
   lint:
-    desc: 離線靜態檢查：四大文件、Taskfile、shellcheck
+    desc: "[開發] 離線靜態檢查：四大文件、Taskfile、shellcheck"
     cmds:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
@@ -22,15 +33,15 @@ tasks:
       - shellcheck -S warning .githooks/pre-push
 
   test:
-    desc: 單元測試，離線；涵蓋兩動詞腳本、零漂移比對器、litellm 設定入庫
+    desc: "[開發] 單元測試，離線；涵蓋兩動詞腳本、零漂移比對器、litellm 設定入庫、gmm 的 seed 確認"
     cmds:
       - python3 tests/test_svc.py
       - python3 tests/test_manifest_diff.py
       - python3 tests/test_litellm_config.py
       - python3 tests/test_gmm_sync.py
 
-  litellm:check:
-    desc: 實機回歸：對執行中的 litellm 跑 DLP 與分流情境（要先部署 litellm；用法：task litellm:check）
+  check:litellm:
+    desc: "[開發] 實機回歸：對執行中的 litellm 跑 DLP 與分流情境（要先部署 litellm；用法：task check:litellm）"
     summary: |
       打主機本機的 litellm，環境變數 LITELLM_URL 可以改位址。
       key 從 litellm 與 openwebui 的 secret/secret.env 讀，不印出。
@@ -38,16 +49,16 @@ tasks:
     cmds:
       - python3 tests/live_gateway.py
 
-  image:check:
-    desc: '確認渲染後每個 image 都是完整參照，且仍存在於來源 registry（skopeo inspect；用法：task image:check SVC=grafana）'
+  check:image:
+    desc: "[開發] 確認渲染後每個 image 都是完整參照，且仍存在於來源 registry（skopeo inspect；用法：task check:image SVC=grafana）"
     preconditions:
       - sh: "[ -n '{{.SVC}}' ]"
-        msg: '用法：task image:check SVC=grafana（未提供 SVC）'
+        msg: "用法：task check:image SVC=grafana（未提供 SVC）"
     cmds:
       - bash bin/assert-images.sh '{{.SVC}}'
 
   apply:
-    desc: '部署服務（用法：task apply SVC=grafana TRACK=podman）'
+    desc: "[維運] 部署服務（用法：task apply SVC=grafana TRACK=podman）"
     summary: |
       轉派至 bin/svc.sh。k8s 軌跑 kubectl apply -k；podman 軌把 kubectl kustomize 的輸出接給 sudo podman kube play --replace。
       k8s 軌套用到當前 KUBECONFIG context 所指的叢集，namespace 由該軌 kustomization.yaml 的 namespace 欄決定。
@@ -60,7 +71,8 @@ tasks:
       - bash bin/svc.sh '{{.SVC}}' apply '{{.TRACK}}'
 
   delete:
-    desc: '拆除服務（破壞性：k8s 連 PVC、podman 連卷；用法：task delete SVC=grafana TRACK=podman）'
+    # 確認由腳本負責：bin/svc.sh
+    desc: "[維運]【破壞性】拆除服務，k8s 連 PVC、podman 連卷（用法：task delete SVC=grafana TRACK=podman）"
     summary: |
       不可逆。執行前會要求輸入服務名確認；無 tty（cron／CI）時 read 失敗、腳本中止、什麼都不刪。
       k8s 軌 kubectl delete 全部資源含 PVC（叢集 StorageClass reclaimPolicy 為 Delete，資料會連動刪除）。
@@ -76,31 +88,33 @@ tasks:
       - bash bin/svc.sh '{{.SVC}}' delete '{{.TRACK}}'
 
   seed:
-    desc: '把帳號、設定、權重寫進執行中的服務（用法：task seed SVC=gmm；vllm 另加 TRACK=<軌>）'
+    # 確認由腳本負責：services/gmm/sync.sh
+    desc: "[維運]【破壞性】把帳號、設定、權重寫進執行中的服務，gmm 會刪多餘的帳號（用法：task seed SVC=gmm；vllm 另加 TRACK=<軌>）"
     summary: |
       轉派至 services/<svc>/sync.sh，各服務實作不同，皆為冪等的 best-effort 營運工具。
       gmm 透過 guacamole REST API 建連線。
       openwebui 種第一位 admin，替每個模型寫入系統提示詞，再寫入常駐橫幅與語音開關。
       vllm 把模型權重下載進具名卷。模型清單取自 TRACK 那一軌的渲染產物，所以一定要給 TRACK。
       TRACK 以環境變數傳給 sync.sh，不讀軌名的服務忽略它。
-      唯讀檢查改用 task seed:check。
+      唯讀檢查改用 task check:seed。
       注意 gmm 的 seed 具破壞性：會刪除 mapping.env 以外多餘的 user／group／connection（僅保留 admin 帳號與 ROOT 群組）。
+      gmm 的 sync.sh 動資料前要求輸入服務名確認；無 tty 時中止、什麼都不刪。其餘服務不刪資料，不問確認。
     preconditions:
       - sh: "[ -n '{{.SVC}}' ]"
         msg: '用法：task seed SVC=gmm（未提供 SVC）'
       - sh: "[ -z '{{.CLI_ARGS}}' ]"
-        msg: 'seed 不收 -- 之後的參數；唯讀檢查改用 task seed:check SVC=<svc>'
+        msg: "seed 不收 -- 之後的參數；唯讀檢查改用 task check:seed SVC=<svc>"
     cmds:
       - TRACK='{{.TRACK | default ""}}' bash services/{{.SVC}}/sync.sh
 
-  seed:check:
-    desc: '唯讀檢查 seed 的結果（用法：task seed:check SVC=gmm；vllm 另加 TRACK=<軌>）'
+  check:seed:
+    desc: "[維運] 唯讀檢查 seed 的結果（用法：task check:seed SVC=gmm；vllm 另加 TRACK=<軌>）"
     summary: |
       轉派至 services/<svc>/sync.sh test，只做唯讀檢查、不寫入變更。
       gmm 驗證帳號 token，openwebui 驗證 token、系統提示詞、橫幅與語音開關。
       vllm 檢查權重是否已在卷裡。
     preconditions:
       - sh: "[ -n '{{.SVC}}' ]"
-        msg: '用法：task seed:check SVC=gmm（未提供 SVC）'
+        msg: "用法：task check:seed SVC=gmm（未提供 SVC）"
     cmds:
       - TRACK='{{.TRACK | default ""}}' bash services/{{.SVC}}/sync.sh test

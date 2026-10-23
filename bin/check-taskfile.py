@@ -39,6 +39,9 @@ VERBS = {
     "clean": "刪可重建的本機產物與快取",
     "reset": "還原成初始狀態，不可逆",
     "doctor": "檢查執行環境：命令存在與種類、hooksPath 來源，不安裝",
+    "apply": "套設定到真實環境",
+    "delete": "拆除真實環境的資源",
+    "seed": "把帳號、設定、權重寫進執行中的服務",
 }
 DESTRUCTIVE = "【破壞性】"
 EXEMPT_RE = re.compile(r"^\s*# 確認由腳本負責：\S", re.M)
