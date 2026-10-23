@@ -27,6 +27,7 @@ tasks:
       - python3 tests/test_svc.py
       - python3 tests/test_manifest_diff.py
       - python3 tests/test_litellm_config.py
+      - python3 tests/test_gmm_sync.py
 
   litellm:check:
     desc: 實機回歸：對執行中的 litellm 跑 DLP 與分流情境（要先部署 litellm；用法：task litellm:check）

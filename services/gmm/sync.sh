@@ -34,6 +34,12 @@ get_token
 if [[ "${mode}" == "test" ]]; then echo "Success: token ok"; exit 0; fi
 [[ -f "${here}/mapping.env" ]] || { echo "Error: ${here}/mapping.env 不存在（cp mapping.env.example mapping.env 後填）" >&2; exit 1; }
 
+# 結尾的 cleanup 會刪資料，所以動任何資料前先確認，照 bin/svc.sh 的 confirm()。
+# `|| true` 不可省：read 遇 EOF（無 tty、管線呼叫）回非零，放行後 ans 為空字串，比對照樣失敗。
+read -r -p "刪除 mapping.env 以外的 user、group、connection，不可逆。輸入服務名確認：" ans || true
+# 取消走 Info: 而非 Error:：使用者主動放棄不是錯誤。
+[[ "${ans}" == "gmm" ]] || { echo "Info: 已取消（輸入的名稱與服務名不符）"; exit 1; }
+
 declare -A map_users map_groups map_conns
 
 while IFS= read -r line || [[ -n "${line}" ]]; do
