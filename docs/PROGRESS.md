@@ -11,13 +11,7 @@
 - 未驗證：ncb 的憑證順序、`bin/svc.sh` 對 podman `delete` 的 exit 125 容錯、「拆 pod 留卷」的手動做法，見〈待辦〉。
 - blocker：沒有。
 
-## 2. 進行中
-
-- 這個分支：套用 Taskfile〈分類原則〉，gmm 的 seed 加確認。
-- 做到哪：實作、文件同步完成，`task lint` 與 `task test` 綠。
-- 下一步：整個分支的 code review，再 merge 回 main。
-
-## 3. 待辦
+## 2. 待辦
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
