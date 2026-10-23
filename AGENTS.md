@@ -4,9 +4,8 @@
 
 ## 1. 30 秒定位
 
-- 這是容器服務的部署集，沒有應用程式碼。內容是 kustomize manifest 正本、一支部署控制腳本 `bin/svc.sh`、離線測試、litellm 的實機回歸，以及各服務的營運工具 `sync.sh`。
+- 這是容器服務的部署集，沒有應用程式碼。內容是 kustomize manifest 正本、一支部署控制腳本 `bin/svc.sh`、離線測試，以及各服務的營運工具 `sync.sh`。
 - 渲染由 kustomize 原生欄位（`namespace:`、`images:`）完成，腳本不做任何字串替換。`bin/svc.sh` 只做守衛、機密補位與確認，部署交給 `kubectl apply -k` 與 `podman kube play`。
-- LiteLLM 的 DLP 與自動分流都用內建功能，設定在 `services/litellm/base/config.yaml`。
 - 改結構前先讀 `docs/ARCHITECTURE.md`〈依賴與資料流〉。
 - 沒有 CI，所有驗證都在本機。不要假設遠端有東西幫你擋。
 - push 護欄是本 repo 自帶的 `.githooks/pre-push`，由帳號層派工 hook 呼叫。兩層怎麼串，見 `~/.claude/rules/githooks.md`〈兩層 hook 怎麼串〉。
@@ -21,7 +20,7 @@
 
 ### 機密真值檔就在本機磁碟上
 
-有機密的服務（`ls services/*/secret/secret.env.example`），同目錄的 `secret.env` 存在且含真值，靠 `.gitignore` 擋住。quay 另有 `secret/config.yaml`，`gmm` 與 `openwebui` 另有 `sync.secret.env`。gmm 還有兩個：`mapping.env` 含目標主機的明文帳密，`random.csv` 是 seed 自動產生的使用者密碼，唯一留存處。
+有機密的服務（`ls services/*/secret/secret.env.example`），同目錄的 `secret.env` 存在且含真值，靠 `.gitignore` 擋住。quay 另有 `secret/config.yaml`，`gmm` 另有 `sync.secret.env`，還有兩個：`mapping.env` 含目標主機的明文帳密，`random.csv` 是 seed 自動產生的使用者密碼，唯一留存處。
 
 - 不要 `cat` 它們，不要把內容貼進任何輸出，不要 `git add -f`。
 - 要知道有哪些鍵，讀同目錄的 `.example`。
@@ -39,7 +38,6 @@
 
 - 從主工作樹複製真值檔進 worktree，用 `cp -p` 保留原權限。
 - `git worktree remove` 會連同 worktree 裡的機密檔一起刪掉，主工作樹要留一份。
-- `task check:litellm` 也從兩份 `secret.env` 讀 key，在 worktree 裡跑之前同樣要先複製。
 
 ### 加一個服務
 
@@ -53,16 +51,16 @@
 
 ### 改映像版本
 
-改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。`vllm` 的容器共用同一顆映像，但短名各一筆，base 的每一筆都要改。
+改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。
 
-改完跑 `task check:image SVC=<svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。vllm 與 pgvector 的 mirror 只收目前使用的次版號（images 的 `sync/repository/vllm.yaml`、`pgvector.yaml`），升次版號要先去 images 改規則並同步一次，否則 `task check:image` 查不到映像。
+改完跑 `task check:image SVC=<svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。
 
 ### 寫程式的規矩
 
 - bash：不要把 `[[ cond ]] && { ...; }` 當獨立語句。條件為假時整段回非零，日後加上 `errexit` 會靜默中止；當腳本最後一條語句時，整支腳本會以 1 結束。用 `if` 寫。既有的違規列在 `docs/PROGRESS.md`，不要順手改。
 - 不在 bash 裡解析 YAML，要解析就用 python。
 - `yq` 是 python-yq，只用 jq 相容語法，不用 `yq e`、`yq ea`、`yq eval`。
-- 語言只用 bash 與 python。bash 管流程、IO、git 膠水；python 管結構化資料驗證與 litellm 的實機回歸。`config.yaml` 裡的 `custom_code` 是 LiteLLM 沙箱跑的類 Python，照 LiteLLM 的規格寫。
+- 語言只用 bash 與 python。bash 管流程、IO、git 膠水；python 管結構化資料驗證。
 
 ## 3. 地雷
 
@@ -91,39 +89,7 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 - `kind: Pod` 起出來的 pod 叫 `<svc>`；`Deployment`、`DaemonSet` 叫 `<svc>-pod`，容器叫 `<svc>-pod-<容器名>`。`podman pod stop`、`logs` 這類指令要跟著改。
 - podman 軌是 rootful：`bin/svc.sh` 用 `sudo podman`。不加 `sudo` 的 `podman pod ps`、`podman volume ls`、`podman logs` 看的是你自己的 rootless 實例，什麼都查不到，看起來像服務沒起來。沒有 tty 時 sudo 要密碼會直接失敗，先 `sudo -v`。
 - `apply` 失敗時（例如 hostPort 被占）建一半的 pod 會留在系統裡繼續占埠，擋住下一個服務；`--replace` 只換同名 pod，不處理別的服務留下的。清法是 `sudo podman pod rm -f <pod>`。
-- podman 軌沒有 Service，別的 pod 要用「Deployment 名加 `-pod`」連，例如 `http://litellm-pod:4000`。base 裡寫 K8s Service 名的 env，podman 軌的 overlay 要改寫。例外是 `services/litellm/base/config.yaml`：它是 ConfigMap 檔，`api_base` 直接寫 podman 名，k8s overlay 不改寫。
-- podman 掛 GPU 要寫 CDI 名稱（`nvidia.com/gpu=all` 或編號 `nvidia.com/gpu=0`），由 overlay 從 base 的 K8s 鍵換過來。同一個 pod 裡混用不同編號還沒驗過：第一次這樣部署時，進每個容器跑 `nvidia-smi`，確認它只看得到自己那張卡。
-
-### 同一張卡上的 GPU 記憶體要跨服務一起算
-
-vLLM 的 `--gpu-memory-utilization` 以整張卡為分母，同一張卡上所有容器加總不超過 0.92，理由寫在 `services/vllm/base/deployment.yaml` 的註解。別的 pod 也掛同一張卡時（例如本機的 finetune），改 `vllm` 的比例要回頭看它。
-
-### litellm 改了，openwebui 要跟著跑 seed
-
-OpenWebUI 的系統提示詞、橫幅與語音開關由 `task seed SVC=openwebui` 寫進資料庫，不靠環境變數。litellm 新增模型後要再跑一次，新模型才會有系統提示詞。`task check:seed` 會列出沒套上系統提示詞的模型。
-
-### 自動分流與 DLP
-
-設定都在 `services/litellm/base/config.yaml`，單一設定項的坑寫在該檔註解。下面是跨檔或要動手才會碰到的：
-
-- **分流不是資安邊界。** 使用者可以在訊息裡指定判斷結果，或加特定字串讓判斷升級。資料能不能送出去，靠 DLP 把關。
-- **看請求去了哪裡，要看回應標頭 `x-litellm-model-name`。** `x-litellm-model-group` 與回應本文的 `model` 都寫 `chat-auto`。
-- **DLP 阻擋時回 200，不是錯誤。** 回應是一則以「DLP：請求含有…」開頭的合成回答，agent 看到的是一般回答。
-- **DLP 檢查整段對話。** 一段對話出現過個資，之後每一輪送雲端都會命中。email 規則也會命中程式碼裡的 git 位址。
-- **改了 `KEYWORDS` 或 `config.yaml`，要重新部署 litellm。** k8s 軌另跑 `kubectl rollout restart deployment/litellm`：ConfigMap 名稱不帶雜湊，`apply` 不會重啟 pod。
-- **LiteLLM 升版後要重跑 `task check:litellm`。** 沙箱的限制或 `inputs` 的欄位變了，不會報錯。
-
-### LiteLLM 加 worker 或副本前，要先上 Redis
-
-LiteLLM 現在只跑 1 個 worker 與 1 個副本，沒有 Redis。限流計數、並行數、預算與路由的冷卻狀態都存在各行程的記憶體裡。加了 worker 或副本之後，各行程各算各的，會各自放行同一份額度，而且不報錯。podman 軌會忽略 `replicas`，只能加 worker。
-
-要加 worker（`--num_workers` 大於 1）或副本時，三件事一起做：
-
-1. 上 Redis。兩處都要接：限流與預算用的協調快取（`general_settings.coordination_redis` 或 `REDIS_*` 環境變數），以及路由器的 `router_settings.redis_host`。
-2. 拿掉 `services/litellm/base/deployment.yaml` 的 `LITELLM_DISABLE_NO_REDIS_WARNING`。留著它，Redis 沒接上時也看不到提示。
-3. 加副本時，把 PostgreSQL 搬出 litellm 的 pod。postgres 的資料在 `ReadWriteOnce` 的 PVC，每個副本都會起一個 postgres 搶同一個 PVC。只加 worker 時不用搬。
-
-做完後，帶 key 打 `/health/readiness/details`，確認 `show_no_redis_warning` 是 `false`；再讀設定檔，確認 `router_settings.redis_host` 有值。前一步驗不到路由器那一處。
+- podman 軌沒有 Service，別的 pod 要用「Deployment 名加 `-pod`」連，例如 `http://grafana-pod:3000`。base 裡寫 K8s Service 名的 env，podman 軌的 overlay 要改寫。
 
 ## 4. 完成定義
 
@@ -131,14 +97,13 @@ LiteLLM 現在只跑 1 個 worker 與 1 個副本，沒有 Redis。限流計數�
 
 - L1：`task lint` 回 0。
 - L2：`task test`。每支測試檔都要印 `ALL <n> PASS`，而且 `task test` 回 0。
-- L3：真環境。只在改到跨元件的路徑時才跑，例如部署流程、服務之間的連線、litellm 的 DLP 與分流。要跑哪些，見〈改了哪類檔要多驗什麼〉。
+- L3：真環境。只在改到跨元件的路徑時才跑，例如部署流程、服務之間的連線。要跑哪些，見〈改了哪類檔要多驗什麼〉。
 
 ### 改了哪類檔要多驗什麼
 
 - 改了 manifest 或 `kustomization.yaml`：跑 `kubectl kustomize services/<svc>/k8s`，podman 軌同樣跑一次。先備好機密檔，見〈手動跑 `kubectl kustomize` 前，要先備好機密檔〉。
 - 改了 `images:` 或 manifest 的 `image:`：跑 `task check:image SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
-- 重新部署 litellm 後：跑 `task check:litellm`。它呼叫 `tests/live_gateway.py`，打正式的 litellm，不是離線測試。檔名刻意不以 `test_` 開頭，pytest 不會收進去。
 - 改了 `.githooks/` 或 `bin/check-*.py`：照 `~/.claude/rules/githooks.md`〈改了 `.githooks/` 底下任何東西〉再跑一次真的 hook。手動跑時照 `~/.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
 
 ### `task test` 回 0 不等於每支都跑了

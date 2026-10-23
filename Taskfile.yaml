@@ -29,25 +29,15 @@ tasks:
     cmds:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
-      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh services/gmm/sync.sh services/openwebui/sync.sh services/vllm/sync.sh
+      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh services/gmm/sync.sh
       - shellcheck -S warning .githooks/pre-push
 
   test:
-    desc: "[開發] 單元測試，離線；涵蓋兩動詞腳本、零漂移比對器、litellm 設定入庫、gmm 的 seed 確認"
+    desc: "[開發] 單元測試，離線；涵蓋兩動詞腳本、零漂移比對器、gmm 的 seed 確認"
     cmds:
       - python3 tests/test_svc.py
       - python3 tests/test_manifest_diff.py
-      - python3 tests/test_litellm_config.py
       - python3 tests/test_gmm_sync.py
-
-  check:litellm:
-    desc: "[開發] 實機回歸：對執行中的 litellm 跑 DLP 與分流情境（要先部署 litellm；用法：task check:litellm）"
-    summary: |
-      打主機本機的 litellm，環境變數 LITELLM_URL 可以改位址。
-      key 從 litellm 與 openwebui 的 secret/secret.env 讀，不印出。
-      每則印 [OK] 或 [FAIL]，全部通過時退出碼 0。
-    cmds:
-      - python3 tests/live_gateway.py
 
   check:image:
     desc: "[開發] 確認渲染後每個 image 都是完整參照，且仍存在於來源 registry（skopeo inspect；用法：task check:image SVC=grafana）"
@@ -89,12 +79,10 @@ tasks:
 
   seed:
     # 確認由腳本負責：services/gmm/sync.sh
-    desc: "[維運]【破壞性】把帳號、設定、權重寫進執行中的服務，gmm 會刪多餘的帳號（用法：task seed SVC=gmm；vllm 另加 TRACK=<軌>）"
+    desc: "[維運]【破壞性】把帳號、設定寫進執行中的服務，gmm 會刪多餘的帳號（用法：task seed SVC=gmm）"
     summary: |
       轉派至 services/<svc>/sync.sh，各服務實作不同，皆為冪等的 best-effort 營運工具。
       gmm 透過 guacamole REST API 建連線。
-      openwebui 種第一位 admin，替每個模型寫入系統提示詞，再寫入常駐橫幅與語音開關。
-      vllm 把模型權重下載進具名卷。模型清單取自 TRACK 那一軌的渲染產物，所以一定要給 TRACK。
       TRACK 以環境變數傳給 sync.sh，不讀軌名的服務忽略它。
       唯讀檢查改用 task check:seed。
       注意 gmm 的 seed 具破壞性：會刪除 mapping.env 以外多餘的 user／group／connection（僅保留 admin 帳號與 ROOT 群組）。
@@ -108,11 +96,10 @@ tasks:
       - TRACK='{{.TRACK | default ""}}' bash services/{{.SVC}}/sync.sh
 
   check:seed:
-    desc: "[維運] 唯讀檢查 seed 的結果（用法：task check:seed SVC=gmm；vllm 另加 TRACK=<軌>）"
+    desc: "[維運] 唯讀檢查 seed 的結果（用法：task check:seed SVC=gmm）"
     summary: |
       轉派至 services/<svc>/sync.sh test，只做唯讀檢查、不寫入變更。
-      gmm 驗證帳號 token，openwebui 驗證 token、系統提示詞、橫幅與語音開關。
-      vllm 檢查權重是否已在卷裡。
+      gmm 驗證帳號 token。
     preconditions:
       - sh: "[ -n '{{.SVC}}' ]"
         msg: "用法：task check:seed SVC=gmm（未提供 SVC）"

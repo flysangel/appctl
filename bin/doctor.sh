@@ -52,7 +52,7 @@ if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import yaml' >/dev/null 2
 fi
 
 want skopeo 'task check:image'
-want podman 'podman 軌的 apply、delete 與 vllm 的 seed'
+want podman 'podman 軌的 apply、delete'
 want sudo 'podman 軌的 apply、delete'
 want jq 'task seed'
 want curl 'task seed'
