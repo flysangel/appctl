@@ -11,9 +11,7 @@ id_rsa*
 # build / render 產出
 build/
 
-# 服務營運機密（sync 工具）
-sync.conf
-mapping.list
+# 服務營運機密（sync 工具）。sync.secret.env 與 gmm 的 mapping.env 由上方 *.env 擋住；sync.conf 不含機密，進版控
 random.csv
 
 # Python

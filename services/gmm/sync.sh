@@ -1,6 +1,6 @@
 #!/bin/bash
 # sync.sh — 透過 guacamole 的 REST API 建立連線設定（具冪等性，含 cleanup 與 nmap 存活驗證）。用法：bash sync.sh [sync|test]
-# 設定讀取自同目錄的 sync.conf；對應表讀取自同目錄的 mapping.list（以 pipe 分隔，需恰好 10 欄）。屬 best-effort 營運工具。
+# 設定讀取自同目錄的 sync.conf；對應表讀取自同目錄的 mapping.env（以 pipe 分隔，需恰好 10 欄）。屬 best-effort 營運工具。
 # 每行的順序：nmap 定名 → 記進 map → user → group（取 gid）→ connection（取 cid）→ sharing profile → permission。
 # gid 或 cid 取不到就跳過該行後半，但該行已記進 map，結尾的 cleanup 不會刪它。
 # 全部 curl 都不看回應，沒有 errexit，過了前置檢查後一律以 0 結束；失敗只在下一步「取 id 失敗」時以 Info 浮現。
@@ -8,7 +8,7 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mode="${1:-sync}"
 for cmd in jq curl nmap; do command -v "$cmd" >/dev/null || { echo "Error: 缺 $cmd" >&2; exit 1; }; done
-[[ -f "${here}/sync.conf" ]] || { echo "Error: ${here}/sync.conf 不存在（cp sync.conf.example sync.conf 後填）" >&2; exit 1; }
+[[ -f "${here}/sync.conf" ]] || { echo "Error: ${here}/sync.conf 不存在（它進版控，從 repo 還原）" >&2; exit 1; }
 # shellcheck source=/dev/null
 source "${here}/sync.conf"
 [[ -f "${here}/sync.secret.env" ]] || { echo "Error: ${here}/sync.secret.env 不存在（cp sync.secret.env.example sync.secret.env 後填）" >&2; exit 1; }
@@ -32,7 +32,7 @@ id_by_name()  { jq -r --arg n "$1" 'to_entries[]?|.value|select(.name==$n)|.iden
 
 get_token
 if [[ "${mode}" == "test" ]]; then echo "Success: token ok"; exit 0; fi
-[[ -f "${here}/mapping.list" ]] || { echo "Error: ${here}/mapping.list 不存在（cp mapping.list.example mapping.list 後填）" >&2; exit 1; }
+[[ -f "${here}/mapping.env" ]] || { echo "Error: ${here}/mapping.env 不存在（cp mapping.env.example mapping.env 後填）" >&2; exit 1; }
 
 declare -A map_users map_groups map_conns
 
@@ -99,9 +99,9 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
 
   curl -s -X PATCH "${API}/users/${userAccount}/permissions?token=${token}" -H 'Content-Type: application/json' \
     --data-raw "[{\"op\":\"add\",\"path\":\"/connectionGroupPermissions/${gid}\",\"value\":\"READ\"},{\"op\":\"add\",\"path\":\"/connectionPermissions/${cid}\",\"value\":\"READ\"}]" >/dev/null
-done <"${here}/mapping.list"
+done <"${here}/mapping.env"
 
-# 清除 mapping.list 之外多餘的項目（保留 admin 帳號與 ROOT 群組）
+# 清除 mapping.env 之外多餘的項目（保留 admin 帳號與 ROOT 群組）
 for u in $(users_json | jq -r 'keys[]'); do
   [[ "${u}" == "${GUACAMOLE_ADMIN}" ]] && continue
   [[ -z "${map_users[${u}]:-}" ]] && { curl -s -X DELETE "${API}/users/${u}?token=${token}" >/dev/null; echo "Info: delete user ${u}"; }

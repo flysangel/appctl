@@ -83,7 +83,7 @@ tasks:
       vllm 把模型權重下載進具名卷。模型清單取自 TRACK 那一軌的渲染產物，所以一定要給 TRACK。
       TRACK 以環境變數傳給 sync.sh，不讀軌名的服務忽略它。
       唯讀檢查改用 task seed:check。
-      注意 gmm 的 seed 具破壞性：會刪除 mapping.list 以外多餘的 user／group／connection（僅保留 admin 帳號與 ROOT 群組）。
+      注意 gmm 的 seed 具破壞性：會刪除 mapping.env 以外多餘的 user／group／connection（僅保留 admin 帳號與 ROOT 群組）。
     preconditions:
       - sh: "[ -n '{{.SVC}}' ]"
         msg: '用法：task seed SVC=gmm（未提供 SVC）'

@@ -24,7 +24,7 @@ spec:
         - chat-local
         - --port
         - "8000"
-        # 改 context 長度時，services/litellm/agents/opencode.json.example 的 chat-local limit.context 一起改
+        # 改 context 長度時，services/litellm/agents/opencode.json 的 chat-local limit.context 一起改
         - --max-model-len
         - "32768"
         - --max-num-seqs

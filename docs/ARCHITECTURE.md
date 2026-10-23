@@ -18,6 +18,7 @@
 
 ```
 Taskfile.yaml              唯一入口，task --list-all 列清單
+LICENSE                    Apache License 2.0 全文
 
 bin/
   svc.sh                   部署控制腳本
@@ -40,11 +41,29 @@ services/<svc>/
     secret.env             機密真值（gitignored）
     config.yaml{,.example} （僅 quay）檔案型機密，真值 gitignored、範本進版控
   sync.sh                  （選配）營運工具，哪些服務有：ls services/*/sync.sh
-  sync.conf.example        連線目標與非機密參數的範本，哪些服務有：ls services/*/sync.conf.example；真檔 gitignored
+  sync.conf                連線目標與非機密參數，進版控，哪些服務有：ls services/*/sync.conf
   sync.secret.env.example  sync 用密碼的範本，哪些服務有：ls services/*/sync.secret.env.example；真檔 gitignored
-  mapping.list.example     （僅 gmm）連線清單範本；真檔 mapping.list 與 seed 產出的 random.csv 都 gitignored
+  mapping.env.example      （僅 gmm）連線清單範本；真檔 mapping.env 與 seed 產出的 random.csv 都 gitignored
   agents/                  （僅 litellm）coding agent 的設定範例與發 key 的告知文字，不進 kustomize
 ```
+
+目錄與副檔名照 `~/.claude/rules/directories.md`。沒有 `config/`：每份設定都只給一個服務用，留在 `services/<svc>/`。
+
+`.json` 檔由第三方工具直接讀，文法照該工具的文件：
+
+| 檔 | 讀它的工具 | 用法 |
+|---|---|---|
+| `services/litellm/agents/opencode.json` | OpenCode | 複製到專案根目錄的 `opencode.json` |
+| `services/litellm/agents/claude-settings.local.json` | Claude Code | 複製到專案的 `.claude/settings.local.json`，填入個人 key |
+
+下面這些檔不用 `.conf`、`.env`、`.json`，理由各不同：
+
+| 檔 | 理由 |
+|---|---|
+| `services/openwebui/banner.txt`、`system-prompt.txt`、`services/litellm/agents/key-notice.txt` | 文案，不是設定 |
+| `.githooks/forbidden-patterns.txt`、`.githooks/gitleaks.toml` | harness 範本的副本，改名要從範本一起改；gitleaks 只讀 TOML |
+| `services/quay/secret/config.yaml{,.example}` | quay 只讀 YAML |
+| `services/litellm/base/config.yaml`、`services/ncb/podman/default.conf` | 由 `configMapGenerator` 掛進容器，文法由 LiteLLM 與 nginx 定 |
 
 `build/` 中介產物已經不存在。要看渲染結果，現跑 `kubectl kustomize services/<svc>/<軌>`；base64 機密不落地成檔案。單一服務的完整工作負載要從 `base/` 讀起，overlay 只帶該軌的差異。
 
@@ -86,7 +105,7 @@ manifest 的 `image:` 寫短名（例如 `filebrowser`、`grafana-mariadb`），
 | env 型機密 | `services/<svc>/secret/secret.env`（gitignored） | `secretGenerator` 的 `envs:` 產生 Secret；正本用 `secretKeyRef`、`envFrom` 引用 | 有 `secret/` 的服務 |
 | 檔案型機密 | `services/<svc>/secret/config.yaml`（gitignored），範本 `.example` 進版控 | `secretGenerator` 的 `files:` 直接吃真值檔；workload 用 `volumes[].secret` 掛成檔案 | 只有 quay（Secret `quay-conf`） |
 | 非機密設定檔 | 真檔放在產生它的 kustomize 目錄（quay、litellm 在 `base/`；ncb 只在 `podman/`，因為只有 podman 軌） | `configMapGenerator`；workload 用 `configMap.name` 掛載 | quay（`initdb.sql`）、ncb（`default.conf`）、litellm（`config.yaml`） |
-| sync 工具的本機檔 | `services/<svc>/sync.conf`、`sync.secret.env`，gmm 另有 `mapping.list`（含目標主機的帳密）與 seed 產出的 `random.csv`（自動產生的使用者密碼），全部 gitignored | 不進容器、不經 kustomize；`sync.sh` 在操作者主機讀 | 有 `sync.sh` 的服務；`mapping.list`、`random.csv` 只有 gmm |
+| sync 工具的本機檔 | `services/<svc>/sync.secret.env`，gmm 另有 `mapping.env`（含目標主機的帳密）與 seed 產出的 `random.csv`（自動產生的使用者密碼），全部 gitignored；非機密的 `sync.conf` 進版控 | 不進容器、不經 kustomize；`sync.sh` 在操作者主機讀 | 有 `sync.sh` 的服務；`mapping.env`、`random.csv` 只有 gmm |
 
 kustomize 的 load restrictor 擋裸檔案路徑，不擋目錄型 resource。`envs: [../secret.env]` 會失敗，`resources: [../secret]` 可以：`resources:` 指向的目錄自成一個 kustomize root，`namespace:` 也會正確套到產生的 Secret。所以不需要 `--load-restrictor LoadRestrictionsNone`，`kubectl apply -k` 可以直接用，`delete -k` 也涵蓋 Secret。
 
