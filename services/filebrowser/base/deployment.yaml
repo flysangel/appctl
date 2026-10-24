@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: filebrowser
-        image: filebrowser
+        image: quay.io/flysangel/fbs:base-v1.0.3
         imagePullPolicy: IfNotPresent
         # 先建 served root（.filebrowser.json 的 root 指向處）再以 tini 啟動 filebrowser
         command:

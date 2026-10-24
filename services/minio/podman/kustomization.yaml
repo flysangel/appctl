@@ -1,10 +1,8 @@
 # S3 物件儲存；podman 單節點/k8s 分散式（StatefulSet）。可直接 kubectl kustomize。
-# image 完整字面值見下方 images:，manifest 內只寫短名。image 以 digest 釘選，
-# 故用 digest: 欄而非 newTag:。
+# image 以 digest 釘選，和 base/statefulset.yaml 是同一顆，改版時要一起改。
 # 機密（root 帳密）由 ../secret 的 secretGenerator 產生（Secret minio）。
-# 本軌不引用 ../base：podman kube play 不支援 StatefulSet（實測 exit 125），自帶 pod.yaml 與 images:。
+# 本軌不引用 ../base：podman kube play 不支援 StatefulSet（實測 exit 125），自帶 pod.yaml。
 # namespace 對 podman kube play 無作用，保留是為了與 k8s 軌產物一致。
-# digest: 的值要帶 sha256: 前綴，理由見 services/minio/base/kustomization.yaml。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -12,7 +10,3 @@ namespace: default
 resources:
 - ../secret
 - pod.yaml
-images:
-- name: minio
-  newName: quay.io/flysangel/minio/minio
-  digest: sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2

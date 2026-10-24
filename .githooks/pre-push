@@ -1,6 +1,6 @@
 #!/bin/bash
 # 驅動: git pre-push（自動；由帳號層派工 hook 或本 repo 的 core.hooksPath 呼叫）
-# pre-push — 四道防護規則（guardrail）：機密掃描（gitleaks）、forbidden 掃描、四大文件檢查、Taskfile 檢查
+# pre-push — 四道防護規則（guardrail）：機密掃描（gitleaks）、forbidden 掃描、四大文件檢查、Taskfile 檢查，外加本 repo 的快速檢查（REPO_CHECKS）
 #
 # 註記：逐項容錯，捨棄 -e；一道未過不中斷其餘各道，讓使用者一次看到全部問題
 set -uo pipefail
@@ -264,6 +264,32 @@ scan_taskfile() {
   return 0
 }
 
+# 本 repo 自己的快速檢查：scan_repo_checks <sha>；任一支未過或無法檢查回 1。
+# 腳本照 scan_docs 取自主工作樹的 bin/，主工作樹沒有那支就略過；參數是展開的樹，樹裡沒有機密真值檔，也沒有 .git。
+REPO_CHECKS=(check-manifests.py)
+scan_repo_checks() {
+  local sha tree name script out rc
+  sha="$1"
+  rc=0
+  if ! tree="$(expand_tree "${sha}")"; then
+    echo "Error: 無法展開 ${sha:0:7}，repo 檢查無法執行" >&2
+    return 1
+  fi
+  for name in "${REPO_CHECKS[@]}"; do
+    script="${top}/bin/${name}"
+    if [[ ! -f "${script}" ]]; then
+      echo "Info: 找不到 ${script}，略過這道檢查"
+      continue
+    fi
+    if ! out="$(python3 "${script}" "${tree}" 2>&1 >/dev/null)"; then
+      echo "Error: ${name} 未過（$(basename "${top}") ${sha:0:7}），本機可跑 bin/${name} 查同一批問題" >&2
+      printf '%s\n' "${out}" | head -20 >&2
+      rc=1
+    fi
+  done
+  return "${rc}"
+}
+
 # main
 # 已設定的 remote 清單，供下方判斷 $1 是 remote 名還是直推的 URL
 remotes="$(git remote)"
@@ -303,6 +329,7 @@ while read -r _ local_sha remote_ref remote_sha; do
     else
       scan_docs "${local_sha}" || fail=1
       scan_taskfile "${local_sha}" || fail=1
+      scan_repo_checks "${local_sha}" || fail=1
     fi
   fi
 done

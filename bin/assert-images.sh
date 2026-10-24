@@ -1,6 +1,6 @@
 #!/bin/bash
-# assert-images.sh — 兩道檢查：渲染後每個 image 必須解析為完整參照（images: 漏列或 name 打錯會靜默留短名，
-# kustomize 對此 rc=0 無警告），且該參照於來源 registry 仍存在（skopeo inspect）。
+# assert-images.sh — 兩道檢查：渲染後每個 image 都是完整參照，且該參照於來源 registry 仍存在（skopeo inspect）。
+# 完整參照的離線檢查正本在 bin/check-manifests.py（lint 與 pre-push 都跑）；這裡的判準只是第二道防線。
 # 用法：bash bin/assert-images.sh <SVC>
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,7 +14,7 @@ while read -r ref; do
   # 完整參照的判準：含 registry/repo 分隔的 `/` 加 tag，或帶 digest。短名兩者皆無。
   case "${ref}" in
     */*:*|*@sha256:*) ;;
-    *) echo "Error: ${svc} 的 ${ref} 未解析為完整參照（images: 漏列或 name 打錯）" >&2; rc=1; continue ;;
+    *) echo "Error: ${svc} 的 ${ref} 不是完整參照" >&2; rc=1; continue ;;
   esac
   if skopeo inspect --no-tags "docker://${ref}" >/dev/null 2>&1; then
     echo "OK   ${ref}"

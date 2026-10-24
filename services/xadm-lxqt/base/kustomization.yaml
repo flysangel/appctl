@@ -1,9 +1,4 @@
 # xadm-lxqt（LXQt 桌面的 RDP 管理跳板）工作負載正本。
 # 只有 k8s 軌，沒有 podman 軌。
-# image 完整字面值見下方 images:，manifest 內只寫短名。
 resources:
   - deployment.yaml
-images:
-- name: xadm-lxqt
-  newName: quay.io/flysangel/rdp
-  newTag: "lxqt-k8sadm-v1.0.2"

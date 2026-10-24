@@ -13,14 +13,14 @@
 ## 2. 進行中
 
 - 這個分支做什麼：保留 kustomize，用 Python 補離線檢查、gmm 同步與煙測，修 podman delete 刪卷。計畫與設計只存在主工作樹的 `docs/superpowers/`。
-- 做到哪：`task test` 改成自動收集並要求每支印 `ALL <n> PASS`（計畫 Task 1）。
-- 下一步：映像改寫完整參照，刪掉 `images:`（計畫 Task 2）。
+- 做到哪：映像改寫完整參照，刪掉 `images:`，`bin/check-manifests.py` 掛進 lint 與 pre-push（計畫 Task 2）。
+- 下一步：服務層離線驗證器（計畫 Task 3）。
 
 ## 3. 待辦
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
-- minio 與 juicefs 改用 tag 釘映像：先等 images 替 `minio/minio` 同步版本 tag（列在 images 的 `docs/PROGRESS.md`，mirror 現在只有 `latest`），再改用 `command grep -rln 'digest: sha256:' services/` 列出的每份 `kustomization.yaml`
+- minio 與 juicefs 改用 tag 釘映像：先等 images 替 `minio/minio` 同步版本 tag（列在 images 的 `docs/PROGRESS.md`，mirror 現在只有 `latest`），再改用 `command grep -rln 'sha256:' services/` 列出的每份 manifest
 - 加一道檢查，比對 quay 兩處的值：`secret.env` 的 `DB_PASSWORD`、`REDIS_PASSWORD` 對 `config.yaml` 的 `DB_URI`、`BUILDLOGS_REDIS`、`USER_EVENTS_REDIS`；`deployment.yaml` 的 `POSTGRES_USER`、`POSTGRES_DB` 對 `DB_URI` 的帳號與庫名。不一致時渲染與 `apply` 都成功，quay 起得來但連不上 DB；檢查不能印出值
 - 決定 quay `secret.env` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 去留：沒有容器引用它們，quay 讀的是 `config.yaml` 內的同名鍵，兩處各自漂移。拿掉，或讓上面那條檢查也比對這兩鍵
 - `services/gmm/sync.sh` 把 `GUACAMOLE_PASS` 放進 curl 的 `--data-urlencode`、把 token 放進 `?token=`、把目標主機密碼放進 `--data-raw`，三者都進 argv，`ps` 看得到，違反 `AGENTS.md`〈不要做的事〉。改成 `Guacamole-Token` 標頭（映像內的 guacamole 1.6.0 支援），密碼與 JSON 改經 stdin 或 `curl -K -` 餵
@@ -36,8 +36,7 @@
 **以下有觸發條件才做：**
 
 - 把 `[[ … ]] && { …; }` 獨立語句改成 `if`，位置用 `git grep -n -E '^\s*\[\[.*\]\]\s*&&\s*\{' -- '*.sh'` 查。gmm 的 sync 會刪資料（要替這支腳本加 errexit 時）
-- `bin/assert-images.sh` 補四件：任一軌 `kubectl kustomize` 失敗時要回非零（現在另一軌有產出就印 `Success`）；錯誤訊息分開講 kubectl 與 skopeo；完整參照的判準 `*/*:*` 會把 `localhost:5000/foo` 誤判成完整；抽取 `image:` 的正則可能誤抓 YAML 字串值裡形似 `image:` 的行（改這支檔時）
-- 把 `bin/assert-images.sh` 的離線那一半（渲染產物的 `image:` 都是完整參照）拆成獨立檢查，掛進 `.githooks/pre-push`。整支掛不進去：它要逐一連 registry，而且 pre-push 展開的樹沒有 `secret.env`，有機密的服務在 kustomize 就失敗，要先補 `.example` 佔位檔。做完改 `AGENTS.md`〈`images:` 對不上時不會報錯〉與 `docs/ARCHITECTURE.md`〈設計取捨〉那條（push 時間能接受多十幾秒時）
+- `bin/assert-images.sh` 補兩件：任一軌 `kubectl kustomize` 失敗時要回非零（現在另一軌有產出就印 `Success`）；錯誤訊息分開講 kubectl 與 skopeo（改這支檔時）
 - `bin/svc.sh` 先檢查動詞再補位機密檔（現在打錯動詞也會先建出 `secret.env`），補位出來的檔權限設成 0600（改這支檔時）
 - `.gitignore` 刪掉沒有對應目錄的複數 `secrets/` 規則、`build/` 與「留給遷移期」的註解；單數 `secret/` 的放行規則改成也涵蓋子目錄（改這支檔時）
 - `tests/test_manifest_diff.py` 合併重複的 helper（`run_diff` 與 `_run`），寫死的 `"python3"` 改成 `sys.executable`（改這支檔時）

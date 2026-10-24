@@ -164,7 +164,7 @@ spec、plan、工單放在 `docs/superpowers/` 與 `docs/tickets/`，只存本�
 
 | 方向 | 對象 | 關係 |
 |---|---|---|
-| 上游 | images | 映像推上 registry 後，版號直接寫進各服務 `base/kustomization.yaml` 的 `images:` |
+| 上游 | images | 映像推上 registry 後，版號直接寫進各服務 manifest 的 `image:` |
 | 上游 | infra-k8s | 提供 k8s 軌部署用的叢集 |
 | 護欄 | 帳號層派工 hook | 呼叫本 repo 自帶的 `.githooks/pre-push` |
 

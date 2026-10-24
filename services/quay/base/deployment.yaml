@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: quay-app
-        image: quay-quay-app
+        image: quay.io/flysangel/quay/quay-rhel8:v3.15.6
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
@@ -28,7 +28,7 @@ spec:
         - name: quay-data
           mountPath: /datastorage
       - name: postgresql
-        image: quay-postgresql
+        image: quay.io/flysangel/library/postgres:13.23
         imagePullPolicy: IfNotPresent
         env:
         # 帳號與庫名同時出現在 config.yaml 的 DB_URI，兩處要一致；不一致時渲染與 apply 都成功，quay 連不上 DB。
@@ -48,7 +48,8 @@ spec:
           mountPath: /var/lib/postgresql/data
       # redis 沒掛卷：build log 與 user event 是暫態，pod 重建就清空。
       - name: redis
-        image: quay-redis
+        # REDIS_PASSWORD 這個 env 只有 SCL 的 rhel8/redis-6 映像會讀；換成官方 redis 映像會忽略它，無認證啟動，quay 帶密碼連線反而失敗。
+        image: quay.io/flysangel/rhel8/redis-6:1-1785388756
         imagePullPolicy: IfNotPresent
         env:
         - name: REDIS_PASSWORD

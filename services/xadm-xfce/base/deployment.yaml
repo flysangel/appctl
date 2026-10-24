@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: xadm-xfce
-        image: xadm-xfce
+        image: quay.io/flysangel/rdp:xfce4-k8sadm-v1.0.2
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3389

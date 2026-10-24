@@ -1,10 +1,5 @@
 # iperf3（網路吞吐量測）工作負載正本，兩軌共用。
 # kind 是 DaemonSet：k8s 軌每個 worker 節點一份；podman kube play 也支援此 kind，
 # 單機上就是一個 pod。
-# image 完整字面值見下方 images:，manifest 內只寫短名。
 resources:
   - daemonset.yaml
-images:
-  - name: iperf3
-    newName: quay.io/flysangel/ubuntu
-    newTag: "knife-v1.0.4"

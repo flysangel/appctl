@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: iperf3
-        image: iperf3
+        image: quay.io/flysangel/ubuntu:knife-v1.0.4
         imagePullPolicy: IfNotPresent
         command:
         - iperf3

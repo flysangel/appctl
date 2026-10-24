@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: kadm
-        image: kadm
+        image: quay.io/flysangel/alpine:k8sadm-v1.0.3
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 22

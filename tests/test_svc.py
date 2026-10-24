@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # test_svc.py — bin/svc.sh 自檢：軌守衛、動詞守衛、刪除確認、機密檔 .example fallback 四類，
-# 外加 kustomize 原生渲染的契約（短名解析、裸 $VAR 存活、Secret 固定名）。
+# 外加 kustomize 原生渲染的契約（裸 $VAR 存活、Secret 固定名）。
 # 離線靠 run() 把 KUBECONFIG 指向不存在的路徑達成：kubectl kustomize 是純本地操作不受影響，
 # kubectl apply／delete 等需連叢集的操作會連線失敗，不會對真實叢集建立或動到任何資源。
 import os
@@ -13,15 +13,11 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SVC_SH = os.path.join(ROOT, "bin", "svc.sh")
 ASSERT_IMAGES = os.path.join(ROOT, "bin", "assert-images.sh")
 
-# 新制 fixture：namespace 為字面值、image 為短名，值由 kustomization 的 images: 注入。
+# fixture：namespace 為字面值、image 直接寫完整參照。
 KUSTOMIZATION = """\
 namespace: default
 resources:
   - pod.yaml
-images:
-  - name: demo
-    newName: example.io/demo
-    newTag: "v1"
 """
 
 POD = """\
@@ -32,7 +28,7 @@ metadata:
 spec:
   containers:
   - name: c
-    image: demo
+    image: example.io/demo:v1
     args: ["--user \\"$BARE_VAR\\""]
 """
 
@@ -241,29 +237,11 @@ def test_no_fallback_when_no_example():
 
 # ---------- 渲染契約 ----------
 
-def test_short_name_resolves_to_full_reference():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp)
-        r = kustomize(os.path.join(d, "k8s"))
-        assert r.returncode == 0, r.stderr
-        assert "image: example.io/demo:v1" in r.stdout, r.stdout
-
-
 def test_bare_var_survives_render():
     with tempfile.TemporaryDirectory() as tmp:
         root, d, script = make_svc(tmp)
         r = kustomize(os.path.join(d, "k8s"))
         assert "$BARE_VAR" in r.stdout, "裸 $BARE_VAR 被動到了（機密外洩路徑）"
-
-
-def test_images_name_mismatch_is_silent_no_op():
-    # 記錄 assert-images.sh 存在的理由：name 對不上時 kustomize rc=0 且產物留短名。
-    bad = KUSTOMIZATION.replace("name: demo", "name: typo")
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, kustomization=bad)
-        r = kustomize(os.path.join(d, "k8s"))
-        assert r.returncode == 0, "kustomize 竟然報錯了——本測試的前提要重新檢視"
-        assert "image: demo" in r.stdout, r.stdout
 
 
 def test_secret_generator_name_has_no_hash_suffix():
@@ -292,25 +270,25 @@ def _run_assert(root, svc):
     )
 
 
-def test_assert_images_rejects_unresolved_short_name():
-    bad = KUSTOMIZATION.replace("name: demo", "name: typo")
+def test_assert_images_rejects_short_name():
+    bad = POD.replace("example.io/demo:v1", "demo")
     with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, kustomization=bad)
+        root, d, script = make_svc(tmp, pod=bad)
         r = _run_assert(root, "demo")
         assert r.returncode == 1, r.stdout + r.stderr
-        assert "未解析為完整參照" in r.stderr, r.stderr
+        assert "不是完整參照" in r.stderr, r.stderr
 
 
 def test_assert_images_renders_podman_prefixed_tracks():
     # 服務只有 podman 或 podman-4060ti 軌時也要渲染到。沒渲染到會落到「零個 image」。
-    # 這裡用打錯的短名，讓渲染產物帶出未解析的 image。看錯誤訊息就分得出有沒有渲染到。
-    bad = KUSTOMIZATION.replace("name: demo", "name: typo")
+    # 這裡用短名，讓渲染產物帶出不完整的 image。看錯誤訊息就分得出有沒有渲染到。
+    bad = POD.replace("example.io/demo:v1", "demo")
     for track in PODMAN_TRACKS:
         with tempfile.TemporaryDirectory() as tmp:
-            root, d, script = make_svc(tmp, tracks=(track,), kustomization=bad)
+            root, d, script = make_svc(tmp, tracks=(track,), pod=bad)
             r = _run_assert(root, "demo")
             assert r.returncode == 1, track + r.stdout + r.stderr
-            assert "未解析為完整參照" in r.stderr, track + r.stderr
+            assert "不是完整參照" in r.stderr, track + r.stderr
 
 
 def test_assert_images_rejects_zero_images():

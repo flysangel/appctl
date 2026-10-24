@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: guacamole
-        image: gmm-guacamole
+        image: quay.io/flysangel/gmm:guacamole-v1.0.7
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
@@ -59,7 +59,7 @@ spec:
         - name: recordings
           mountPath: /var/lib/guacamole/recordings
       - name: guacd
-        image: gmm-guacd
+        image: quay.io/flysangel/gmm:guacd-v1.0.7
         imagePullPolicy: IfNotPresent
         env:
         - name: GUACD_LOG_LEVEL
@@ -68,7 +68,7 @@ spec:
         - name: recordings
           mountPath: /var/lib/guacamole/recordings
       - name: mariadb
-        image: gmm-mariadb
+        image: quay.io/flysangel/gmm:mariadb-v1.0.7
         imagePullPolicy: IfNotPresent
         # 連線名稱含全形括號與中文，所以指定 utf8mb4。
         args:

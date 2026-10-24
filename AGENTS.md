@@ -5,7 +5,7 @@
 ## 1. 30 秒定位
 
 - 這是容器服務的部署集，沒有應用程式碼。內容是 kustomize manifest 正本、一支部署控制腳本 `bin/svc.sh`、離線測試，以及各服務的營運工具 `sync.sh`。
-- 渲染由 kustomize 原生欄位（`namespace:`、`images:`）完成，腳本不做任何字串替換。`bin/svc.sh` 只做守衛、機密補位與確認，部署交給 `kubectl apply -k` 與 `podman kube play`。
+- 渲染由 kustomize 原生欄位（`namespace:`）完成，映像直接寫完整參照在 manifest，腳本不做任何字串替換。`bin/svc.sh` 只做守衛、機密補位與確認，部署交給 `kubectl apply -k` 與 `podman kube play`。
 - 改結構前先讀 `docs/ARCHITECTURE.md`〈依賴與資料流〉。
 - 沒有 CI，所有驗證都在本機。不要假設遠端有東西幫你擋。
 - push 護欄是本 repo 自帶的 `.githooks/pre-push`，由帳號層派工 hook 呼叫。兩層怎麼串，見 `~/.claude/rules/githooks.md`〈兩層 hook 怎麼串〉。
@@ -41,17 +41,16 @@
 
 ### 加一個服務
 
-1. `services/<svc>/base/`：工作負載正本，檔名是 kind 小寫（`deployment.yaml`、`daemonset.yaml`、`pod.yaml`…）。manifest 不放機密真值，`image:` 只寫短名。
-2. `services/<svc>/base/kustomization.yaml`：`resources:` 指向工作負載，加 `images:`。`name:` 寫短名，`newName:` 寫完整 repo，`newTag:` 加雙引號；digest 型改用 `digest:`（值帶 `sha256:` 前綴），而且不給 `newTag:`。
-3. 短名一律帶服務名：單容器用 `<svc>`，多容器用 `<svc>-<容器名>`。不要用裸容器名，理由見〈`images:` 對不上時不會報錯〉。
-4. `services/<svc>/{podman,k8s}/kustomization.yaml`：`namespace: default`、`resources: [../base]`，加該軌專屬的資源（podman 的 hostPort patch；k8s 的 `service.yaml`、`ingress.yaml`、`pvc.yaml`）。podman 軌的 `hostPort` 用 JSON6902 加 `op: test`，照既有服務的 overlay 抄，不用 strategic merge。
-5. 只支援一軌，就只建一個目錄。目錄存在就代表支援。
-6. 有機密時，建 `services/<svc>/secret/`，放 `kustomization.yaml`（`secretGenerator` 加 `generatorOptions.disableNameSuffixHash: true`）與 `secret.env.example`（佔位值，進版控）。兩軌的 `resources:` 各加一行 `../secret`。沒有機密的服務不要建這個目錄：`resources` 指向不存在的目錄，kustomize 會直接失敗。
-7. 跑〈完成定義〉。
+1. `services/<svc>/base/`：工作負載正本，檔名是 kind 小寫（`deployment.yaml`、`daemonset.yaml`、`pod.yaml`…）。manifest 不放機密真值，`image:` 直接寫 mirror 的完整參照（tag 或 `@sha256:` digest）。
+2. `services/<svc>/base/kustomization.yaml`：`resources:` 指向工作負載。不寫 `images:`，`bin/check-manifests.py` 會擋。
+3. `services/<svc>/{podman,k8s}/kustomization.yaml`：`namespace: default`、`resources: [../base]`，加該軌專屬的資源（podman 的 hostPort patch；k8s 的 `service.yaml`、`ingress.yaml`、`pvc.yaml`）。podman 軌的 `hostPort` 用 JSON6902 加 `op: test`，照既有服務的 overlay 抄，不用 strategic merge。
+4. 只支援一軌，就只建一個目錄。目錄存在就代表支援。
+5. 有機密時，建 `services/<svc>/secret/`，放 `kustomization.yaml`（`secretGenerator` 加 `generatorOptions.disableNameSuffixHash: true`）與 `secret.env.example`（佔位值，進版控）。兩軌的 `resources:` 各加一行 `../secret`。沒有機密的服務不要建這個目錄：`resources` 指向不存在的目錄，kustomize 會直接失敗。
+6. 跑〈完成定義〉。
 
 ### 改映像版本
 
-改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。
+改 manifest 的 `image:`。`minio` 的 podman 軌不共用 base，自帶 `pod.yaml`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。
 
 改完跑 `task check:image SVC=<svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。
 
@@ -64,15 +63,13 @@
 
 ## 3. 地雷
 
-### `images:` 對不上時不會報錯
+### 映像還在不在 registry，push 時不會查
 
-manifest 的 `image:` 寫短名，完整參照在 `kustomization.yaml` 的 `images:`。`name:` 對不上時，kustomize 回 0、不警告，產物原樣留著短名。短名如果剛好是 Docker Hub 官方庫的名字（例如 `nginx`、`mariadb`、`redis`），就會拉到能正常啟動的錯映像。所以短名一律帶服務名。
-
-能擋這件事的是 `bin/assert-images.sh`，它只在 `task check:image` 跑，**push 時不會跑**：它要逐一連 registry 查映像，不是幾秒內跑得完的檢查。改了 `images:` 或 manifest 的 `image:`，要自己跑。
+`bin/check-manifests.py` 在 `task lint` 與 push 時擋短名、缺 tag 與 `latest`。映像是不是還在來源 registry，只有 `task check:image` 查，**push 時不會跑**：它要逐一連 registry，不是幾秒內跑得完的檢查。改了 manifest 的 `image:`，要自己跑。
 
 ### `services/` 底下不要寫 `docker.io/` 字面值
 
-push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它擋哪些樣式見 `.githooks/forbidden-patterns.txt`，不要把樣式抄進本檔。映像要用 mirror 的完整參照，寫在 `services/<svc>/base/kustomization.yaml` 的 `images:`。要舉例時，改講法或指路徑。哪些路徑不掃，見 `~/.claude/rules/githooks.md`〈各道掃描的例外不一樣〉。
+push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它擋哪些樣式見 `.githooks/forbidden-patterns.txt`，不要把樣式抄進本檔。映像要用 mirror 的完整參照，直接寫在 manifest 的 `image:`。要舉例時，改講法或指路徑。哪些路徑不掃，見 `~/.claude/rules/githooks.md`〈各道掃描的例外不一樣〉。
 
 ### 手動跑 `kubectl kustomize` 前，要先備好機密檔
 
@@ -102,7 +99,7 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 ### 改了哪類檔要多驗什麼
 
 - 改了 manifest 或 `kustomization.yaml`：跑 `kubectl kustomize services/<svc>/k8s`，podman 軌同樣跑一次。先備好機密檔，見〈手動跑 `kubectl kustomize` 前，要先備好機密檔〉。
-- 改了 `images:` 或 manifest 的 `image:`：跑 `task check:image SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
+- 改了 manifest 的 `image:`：跑 `task check:image SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
 - 改了 `.githooks/` 或 `bin/check-*.py`：照 `~/.claude/rules/githooks.md`〈改了 `.githooks/` 底下任何東西〉再跑一次真的 hook。手動跑時照 `~/.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
 
