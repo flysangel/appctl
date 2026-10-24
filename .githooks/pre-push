@@ -336,6 +336,6 @@ done
 
 if [[ "${fail}" -ne 0 ]]; then
   echo '' >&2
-  echo 'Error: Push 已阻擋：機密 / 禁用引用 / 四大文件 / Taskfile 其一未過（見上方 Error: 輸出）。' >&2
+  echo 'Error: Push 已阻擋：機密 / 禁用引用 / 四大文件 / Taskfile / repo 檢查其一未過（見上方 Error: 輸出）。' >&2
 fi
 exit "${fail}"
