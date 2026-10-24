@@ -35,6 +35,14 @@ tasks:
       - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh services/gmm/sync.sh
       - shellcheck -S warning .githooks/pre-push
 
+  lint:secret:
+    desc: "[開發] 比對機密真值在各檔之間一致，只印鍵名不印值（用法：task lint:secret SVC=quay）"
+    preconditions:
+      - sh: "[ -n '{{.SVC}}' ]"
+        msg: "用法：task lint:secret SVC=quay（未提供 SVC）"
+    cmds:
+      - python3 bin/check-secret.py '{{.SVC}}'
+
   test:
     desc: "[開發] 單元測試，離線；自動收集 tests/test_*.py，每支都要印 ALL <n> PASS"
     cmds:

@@ -13,16 +13,15 @@
 ## 2. 進行中
 
 - 這個分支做什麼：保留 kustomize，用 Python 補離線檢查、gmm 同步與煙測，修 podman delete 刪卷。計畫與設計只存在主工作樹的 `docs/superpowers/`。
-- 做到哪：新增 `bin/check-services.py`（lint 與 pre-push）與 `bin/check-examples.py`（只在 lint），同埠互斥清單搬到 `config/port-groups.conf`（計畫 Task 3）。
-- 下一步：quay 機密一致性檢查（計畫 Task 4）。
+- 做到哪：新增 `task lint:secret SVC=quay`（計畫 Task 4）。對主工作樹的真值跑，結果是 `secret.env` 和 `.example` 相同，是佔位值，要使用者處理。
+- 下一步：gmm 同步改用 Python（計畫 Task 5）。
 
 ## 3. 待辦
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
 - minio 與 juicefs 改用 tag 釘映像：先等 images 替 `minio/minio` 同步版本 tag（列在 images 的 `docs/PROGRESS.md`，mirror 現在只有 `latest`），再改用 `command grep -rln 'sha256:' services/` 列出的每份 manifest
-- 加一道檢查，比對 quay 兩處的值：`secret.env` 的 `DB_PASSWORD`、`REDIS_PASSWORD` 對 `config.yaml` 的 `DB_URI`、`BUILDLOGS_REDIS`、`USER_EVENTS_REDIS`；`deployment.yaml` 的 `POSTGRES_USER`、`POSTGRES_DB` 對 `DB_URI` 的帳號與庫名。不一致時渲染與 `apply` 都成功，quay 起得來但連不上 DB；檢查不能印出值
-- 決定 quay `secret.env` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 去留：沒有容器引用它們，quay 讀的是 `config.yaml` 內的同名鍵，兩處各自漂移。拿掉，或讓上面那條檢查也比對這兩鍵
+- 決定 quay `secret.env` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 去留：沒有容器引用它們，quay 讀的是 `config.yaml` 內的同名鍵，兩處各自漂移。拿掉，或讓 `bin/check-secret.py` 也比對這兩鍵
 - `services/gmm/sync.sh` 把 `GUACAMOLE_PASS` 放進 curl 的 `--data-urlencode`、把 token 放進 `?token=`、把目標主機密碼放進 `--data-raw`，三者都進 argv，`ps` 看得到，違反 `AGENTS.md`〈不要做的事〉。改成 `Guacamole-Token` 標頭（映像內的 guacamole 1.6.0 支援），密碼與 JSON 改經 stdin 或 `curl -K -` 餵
 - `services/gmm/sync.sh` 不看任何 API 回應，永遠以 0 結束。改成檢查每次 curl 的 HTTP 狀態碼，失敗計數後以非零結束；mapping 行解析失敗時中止、不進 cleanup；`sync.sh test` 加 `mapping.env` 存在與欄數檢查。做完改 `AGENTS.md`〈會刪資料的動作，先問使用者〉gmm 那條與 `README.md`〈營運同步（`task seed`）〉最後一條
 - 補 `services/quay/sync.sh` 種第一位 superuser（等 `/health/instance` 回 200 後 `POST /api/v1/user/initialize`），讓 `task seed SVC=quay` 接手 `README.md`〈quay 的第一位 superuser〉的手動步驟

@@ -58,6 +58,7 @@ push 護欄是本 repo 自帶的 `.githooks/pre-push`，由帳號層派工 hook 
 # 有機密的服務先填真值（gitignored）。哪些服務有機密：ls services/*/secret/secret.env.example
 cp services/<svc>/secret/secret.env.example services/<svc>/secret/secret.env
 cp services/quay/secret/config.yaml.example services/quay/secret/config.yaml       # quay 另有檔案型機密，裡面的 DB 與 redis 密碼要和 secret.env 一致
+task lint:secret SVC=quay                                                          # 填完確認 quay 兩處一致，只印鍵名不印值
 ```
 
 **不填也跑得動，但跑起來的是假的。** 機密真值檔不在時，kustomize 直接失敗，所以 `bin/svc.sh` 會從 `.example` 複製一份佔位值補位，`apply` 時多印兩行 `Info:` 說明「用的不是真密碼」。這樣部署出去的服務連不上相依元件。有資料卷的服務（minio、各家的資料庫）會用佔位密碼建卷，之後換成真值時，要刪掉卷再重建。
