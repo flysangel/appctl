@@ -106,11 +106,9 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
 - 改了 `.githooks/` 或 `bin/check-*.py`：照 `~/.claude/rules/githooks.md`〈改了 `.githooks/` 底下任何東西〉再跑一次真的 hook。手動跑時照 `~/.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
 
-### `task test` 回 0 不等於每支都跑了
+### 不要用 pytest 代替 `task test`
 
-`task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務。該任務逐行列出測試檔，不會自動收新檔。新檔的檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。這兩個坑的消除法列在 `docs/PROGRESS.md`，做完就刪這段。
-
-`python3 -m pytest tests/` 也能跑同一批測試，但會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。
+`python3 -m pytest tests/` 會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。`task test` 只收沒被 `.gitignore` 擋掉的檔，收法見 `bin/run-tests.py` 的檔頭。
 
 ### 真環境煙測要逐條手動跑
 

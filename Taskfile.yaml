@@ -33,11 +33,9 @@ tasks:
       - shellcheck -S warning .githooks/pre-push
 
   test:
-    desc: "[開發] 單元測試，離線；涵蓋兩動詞腳本、零漂移比對器、gmm 的 seed 確認"
+    desc: "[開發] 單元測試，離線；自動收集 tests/test_*.py，每支都要印 ALL <n> PASS"
     cmds:
-      - python3 tests/test_svc.py
-      - python3 tests/test_manifest_diff.py
-      - python3 tests/test_gmm_sync.py
+      - python3 bin/run-tests.py
 
   check:image:
     desc: "[開發] 確認渲染後每個 image 都是完整參照，且仍存在於來源 registry（skopeo inspect；用法：task check:image SVC=grafana）"
