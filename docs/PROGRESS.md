@@ -7,18 +7,13 @@
 - 已跑過 harness-adopt，`bin/check-docs.py` 與 `.githooks/` 是範本 repo 的新契約副本。
 - 已套用 `~/.claude/rules/directories.md`，例外列在 `docs/ARCHITECTURE.md`〈目錄結構〉。
 - 已套用 `~/.claude/rules/taskfile.md`〈分類原則〉，`bin/check-taskfile.py` 驗過。
-- 真環境驗過：podman `delete` 在 rootful 下會刪掉 Deployment（filebrowser）與 Pod（minio）的卷；`task smoke -- filebrowser grafana` 通過；gmm 的 `task check:seed` 對正式 gmm 取得 token，`sync.py` 跑到印出計畫為止。
-- 未驗證：ncb 的憑證順序、「拆 pod 留卷」的手動做法，見〈待辦〉。`sync.py` 的寫入路徑還沒在真環境跑過：主工作樹沒有 `mapping.env`。
+- 真環境驗過：podman `delete` 在 rootful 下會刪掉 Deployment（filebrowser）與 Pod（minio）的卷；`task smoke -- filebrowser grafana` 通過；`services/gmm/sync.py` 用 `mapping.env.example` 對正式 gmm 跑了兩次，第二次只覆寫、不新建，冪等成立。
+- 正式 gmm 現在有範本建出的測試資料：user alice、bob，group LAB，兩條帶 `.X` 的連線。密碼在主工作樹的 `services/gmm/random.csv`。主工作樹沒有 `mapping.env` 與 `sync.secret.env`，第一次用真清單 seed 時，這些測試資料會被當成「以外」刪掉。
+- 未驗證：ncb 的憑證順序、「拆 pod 留卷」的手動做法，見〈待辦〉。
 - 主工作樹的 quay `secret.env` 和 `.example` 內容相同，`task lint:secret SVC=quay` 判為佔位值。
 - blocker：沒有。
 
-## 2. 進行中
-
-- 這個分支做什麼：保留 kustomize，用 Python 補離線檢查、gmm 同步與煙測，修 podman delete 刪卷。計畫與設計只存在主工作樹的 `docs/superpowers/`。
-- 做到哪：計畫 Task 1 到 8 完成，整個分支的 code review 跑過，必要修正已 commit。rootful delete 與煙測在真環境通過。
-- 下一步：使用者決定 gmm 寫入路徑要不要驗，再 merge 回 main。
-
-## 3. 待辦
+## 2. 待辦
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
