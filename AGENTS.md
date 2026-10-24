@@ -100,7 +100,7 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 
 - 改了 manifest 或 `kustomization.yaml`：跑 `kubectl kustomize services/<svc>/k8s`，podman 軌同樣跑一次。先備好機密檔，見〈手動跑 `kubectl kustomize` 前，要先備好機密檔〉。
 - 改了 manifest 的 `image:`：跑 `task check:image SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
-- 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
+- 改動會影響很多服務的渲染時（例如改 base 的共用寫法），對每個受影響的服務與軌跑 `bash bin/render-diff.sh <svc> <軌> main`，它比對 `main` 與工作樹的渲染產物，不帶機密真值。要連 Secret 的值一起比時，改用 `bin/manifest-diff.py --include-secrets` 手動比，產物檔含機密，比完就刪。
 - 改了 `.githooks/` 或 `bin/check-*.py`：照 `~/.claude/rules/githooks.md`〈改了 `.githooks/` 底下任何東西〉再跑一次真的 hook。手動跑時照 `~/.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
 
 ### 不要用 pytest 代替 `task test`

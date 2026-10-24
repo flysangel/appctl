@@ -14,8 +14,8 @@
 
 - 這個分支做什麼：保留 kustomize，用 Python 補離線檢查、gmm 同步與煙測，修 podman delete 刪卷。計畫與設計只存在主工作樹的 `docs/superpowers/`。
 - 做到哪：計畫 Task 1 到 6 完成。最近一項是 podman delete 補 PVC 殼並確認卷已刪，`svc.sh` 先驗動詞再補位；缺陷用 rootless 實測證實。主工作樹的 quay `secret.env` 和 `.example` 相同，是佔位值，要使用者處理。gmm 真環境 seed 還沒跑。
-- 也完成 Task 7：`task smoke -- <svc>...` 跑 podman 軌煙測，還沒在真環境跑過。
-- 下一步：跨 revision 的渲染比對（計畫 Task 8）。
+- 也完成 Task 7、8：`task smoke -- <svc>...` 跑 podman 軌煙測（還沒在真環境跑過）；`bin/render-diff.sh` 比對 revision 與工作樹的渲染產物。
+- 下一步：整個分支的 code review，再收尾（計畫 Task 9）。
 
 ## 3. 待辦
 

@@ -32,7 +32,7 @@ tasks:
       - python3 bin/check-manifests.py
       - python3 bin/check-services.py
       - python3 bin/check-examples.py
-      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh bin/smoke.sh services/gmm/sync.sh
+      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh bin/smoke.sh bin/render-diff.sh services/gmm/sync.sh
       - shellcheck -S warning .githooks/pre-push
 
   smoke:
