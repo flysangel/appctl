@@ -13,8 +13,8 @@
 ## 2. 進行中
 
 - 這個分支做什麼：保留 kustomize，用 Python 補離線檢查、gmm 同步與煙測，修 podman delete 刪卷。計畫與設計只存在主工作樹的 `docs/superpowers/`。
-- 做到哪：新增 `task lint:secret SVC=quay`（計畫 Task 4）。對主工作樹的真值跑，結果是 `secret.env` 和 `.example` 相同，是佔位值，要使用者處理。
-- 下一步：gmm 同步改用 Python（計畫 Task 5）。
+- 做到哪：gmm 同步改用 `services/gmm/sync.py`，先印計畫再確認，檢查每個 API 回應（計畫 Task 5）。主工作樹的 quay `secret.env` 和 `.example` 相同，是佔位值，要使用者處理。
+- 下一步：podman delete 要真的刪卷，第一步要使用者同意用 sudo 實測（計畫 Task 6）。
 
 ## 3. 待辦
 
@@ -22,8 +22,6 @@
 
 - minio 與 juicefs 改用 tag 釘映像：先等 images 替 `minio/minio` 同步版本 tag（列在 images 的 `docs/PROGRESS.md`，mirror 現在只有 `latest`），再改用 `command grep -rln 'sha256:' services/` 列出的每份 manifest
 - 決定 quay `secret.env` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 去留：沒有容器引用它們，quay 讀的是 `config.yaml` 內的同名鍵，兩處各自漂移。拿掉，或讓 `bin/check-secret.py` 也比對這兩鍵
-- `services/gmm/sync.sh` 把 `GUACAMOLE_PASS` 放進 curl 的 `--data-urlencode`、把 token 放進 `?token=`、把目標主機密碼放進 `--data-raw`，三者都進 argv，`ps` 看得到，違反 `AGENTS.md`〈不要做的事〉。改成 `Guacamole-Token` 標頭（映像內的 guacamole 1.6.0 支援），密碼與 JSON 改經 stdin 或 `curl -K -` 餵
-- `services/gmm/sync.sh` 不看任何 API 回應，永遠以 0 結束。改成檢查每次 curl 的 HTTP 狀態碼，失敗計數後以非零結束；mapping 行解析失敗時中止、不進 cleanup；`sync.sh test` 加 `mapping.env` 存在與欄數檢查。做完改 `AGENTS.md`〈會刪資料的動作，先問使用者〉gmm 那條與 `README.md`〈營運同步（`task seed`）〉最後一條
 - 補 `services/quay/sync.sh` 種第一位 superuser（等 `/health/instance` 回 200 後 `POST /api/v1/user/initialize`），讓 `task seed SVC=quay` 接手 `README.md`〈quay 的第一位 superuser〉的手動步驟
 - `services/quay/k8s/ingress.yaml` 補 `nginx.ingress.kubernetes.io/proxy-body-size`：ingress-nginx 文件的預設 body 上限是 1m，推映像層會 413；infra-k8s 的 ingress addon 沒有全域設定
 - quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`task apply` 回來時 quay 還沒就緒
@@ -34,7 +32,7 @@
 
 **以下有觸發條件才做：**
 
-- 把 `[[ … ]] && { …; }` 獨立語句改成 `if`，位置用 `git grep -n -E '^\s*\[\[.*\]\]\s*&&\s*\{' -- '*.sh'` 查。gmm 的 sync 會刪資料（要替這支腳本加 errexit 時）
+- 把 `[[ … ]] && { …; }` 獨立語句改成 `if`，位置用 `git grep -n -E '^\s*\[\[.*\]\]\s*&&\s*\{' -- '*.sh'` 查（要替某支腳本加 errexit 時）
 - `bin/assert-images.sh` 補兩件：任一軌 `kubectl kustomize` 失敗時要回非零（現在另一軌有產出就印 `Success`）；錯誤訊息分開講 kubectl 與 skopeo（改這支檔時）
 - `bin/svc.sh` 先檢查動詞再補位機密檔（現在打錯動詞也會先建出 `secret.env`），補位出來的檔權限設成 0600（改這支檔時）
 - `.gitignore` 刪掉沒有對應目錄的複數 `secrets/` 規則、`build/` 與「留給遷移期」的註解；單數 `secret/` 的放行規則改成也涵蓋子目錄（改這支檔時）

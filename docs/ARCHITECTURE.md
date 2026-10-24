@@ -102,7 +102,7 @@ manifest 的 `image:` 直接寫 mirror 的完整參照，原始檔的值就是�
 | env 型機密 | `services/<svc>/secret/secret.env`（gitignored） | `secretGenerator` 的 `envs:` 產生 Secret；正本用 `secretKeyRef`、`envFrom` 引用 | 有 `secret/` 的服務 |
 | 檔案型機密 | `services/<svc>/secret/config.yaml`（gitignored），範本 `.example` 進版控 | `secretGenerator` 的 `files:` 直接吃真值檔；workload 用 `volumes[].secret` 掛成檔案 | 只有 quay（Secret `quay-conf`） |
 | 非機密設定檔 | 真檔放在產生它的 kustomize 目錄（quay 在 `base/`；ncb 只在 `podman/`，因為只有 podman 軌） | `configMapGenerator`；workload 用 `configMap.name` 掛載 | quay（`initdb.sql`）、ncb（`default.conf`） |
-| sync 工具的本機檔 | `services/<svc>/sync.secret.env`，gmm 另有 `mapping.env`（含目標主機的帳密）與 seed 產出的 `random.csv`（自動產生的使用者密碼），全部 gitignored | 不進容器、不經 kustomize；`sync.sh` 在操作者主機讀 | 有 `sync.sh` 的服務；`mapping.env`、`random.csv` 只有 gmm |
+| sync 工具的本機檔 | `services/<svc>/sync.secret.env`，gmm 另有 `mapping.env`（含目標主機的帳密）與 seed 產出的 `random.csv`（自動產生的使用者密碼），全部 gitignored | 不進容器、不經 kustomize；sync 工具在操作者主機讀 | 有 `sync.sh` 的服務；`mapping.env`、`random.csv` 只有 gmm |
 
 kustomize 的 load restrictor 擋裸檔案路徑，不擋目錄型 resource。`envs: [../secret.env]` 會失敗，`resources: [../secret]` 可以：`resources:` 指向的目錄自成一個 kustomize root，`namespace:` 也會正確套到產生的 Secret。所以不需要 `--load-restrictor LoadRestrictionsNone`，`kubectl apply -k` 可以直接用，`delete -k` 也涵蓋 Secret。
 

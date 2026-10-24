@@ -28,7 +28,7 @@
 ### 會刪資料的動作，先問使用者
 
 - `task delete`：k8s 軌連 manifest 內宣告的 PVC 一起刪，叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料跟著消失；podman 軌連具名卷一起移除。
-- `task seed SVC=gmm`：刪除 `mapping.env` 以外多餘的 user、group、connection。腳本動資料前要求輸入服務名，沒有 tty 時中止。欄數不對的行會印 `Error` 跳過，但 cleanup 照跑，那一行的 user、group、connection 也算「以外」，一起被刪；`task check:seed` 不驗 `mapping.env`。改成解析失敗就中止列在 `docs/PROGRESS.md`。
+- `task seed SVC=gmm`：刪除 `mapping.env` 以外多餘的 user、group、connection。腳本動資料前要求輸入服務名，沒有 tty 時中止。腳本先印計畫再確認；`mapping.env` 有任一行欄數不對或一筆都沒有時，整批中止。
 - `task delete SVC=ncb TRACK=podman`：連 `ncb-certbot` 卷刪掉，憑證一起消失。Let's Encrypt 的 rate limits 文件寫同一組網域每 7 天只簽 5 張重複憑證，刪了再簽會撞上限。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 是叢集最高權服務，帳密不能輪換。要部署前，先確認網段隔離。
 
@@ -59,7 +59,7 @@
 - bash：不要把 `[[ cond ]] && { ...; }` 當獨立語句。條件為假時整段回非零，日後加上 `errexit` 會靜默中止；當腳本最後一條語句時，整支腳本會以 1 結束。用 `if` 寫。既有的違規列在 `docs/PROGRESS.md`，不要順手改。
 - 不在 bash 裡解析 YAML，要解析就用 python。
 - `yq` 是 python-yq，只用 jq 相容語法，不用 `yq e`、`yq ea`、`yq eval`。
-- 語言只用 bash 與 python。bash 管流程、IO、git 膠水；python 管結構化資料驗證。
+- 語言只用 bash 與 python。bash 管流程、IO、git 膠水；python 管結構化資料驗證，營運工具要打 HTTP API 時也用 python（例如 `services/gmm/sync.py`）。
 
 ## 3. 地雷
 
