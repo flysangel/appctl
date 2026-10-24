@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: minio
-        image: juicefs-minio
+        image: quay.io/flysangel/minio/minio@sha256:a1a8bd4ac40ad7881a245bab97323e18f971e4d4cba2c2007ec1bedd21cbaba2
         imagePullPolicy: IfNotPresent
         args:
         - server
@@ -40,7 +40,7 @@ spec:
       # `--access-key "$MINIO_ROOT_USER"` 是裸變數，留給容器內 shell 展開；
       # kustomize 不做字串替換，維持原樣。憑證由 ../secret 的 secretGenerator 產生（Secret juicefs）。
       - name: juicefs
-        image: juicefs-juicefs
+        image: quay.io/flysangel/juicedata/mount:ce-v1.3.1
         imagePullPolicy: IfNotPresent
         command:
         - sh

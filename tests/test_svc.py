@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # test_svc.py — bin/svc.sh 自檢：軌守衛、動詞守衛、刪除確認、機密檔 .example fallback 四類，
-# 外加 kustomize 原生渲染的契約（短名解析、裸 $VAR 存活、Secret 固定名）。
+# 外加 kustomize 原生渲染的契約（裸 $VAR 存活、Secret 固定名）。
 # 離線靠 run() 把 KUBECONFIG 指向不存在的路徑達成：kubectl kustomize 是純本地操作不受影響，
 # kubectl apply／delete 等需連叢集的操作會連線失敗，不會對真實叢集建立或動到任何資源。
 import os
@@ -12,16 +12,37 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SVC_SH = os.path.join(ROOT, "bin", "svc.sh")
 ASSERT_IMAGES = os.path.join(ROOT, "bin", "assert-images.sh")
+PVC_SHELLS = os.path.join(ROOT, "bin", "pvc-shells.py")
 
-# 新制 fixture：namespace 為字面值、image 為短名，值由 kustomization 的 images: 注入。
+# Deployment 型 fixture，掛一個具名卷：podman 4.9.3 的 kube down --force 不收它的 claimName
+DEPLOY_WITH_PVC = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+spec:
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+      - name: c
+        image: example.io/demo:v1
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: demo-data
+"""
+
+# fixture：namespace 為字面值、image 直接寫完整參照。
 KUSTOMIZATION = """\
 namespace: default
 resources:
   - pod.yaml
-images:
-  - name: demo
-    newName: example.io/demo
-    newTag: "v1"
 """
 
 POD = """\
@@ -32,7 +53,7 @@ metadata:
 spec:
   containers:
   - name: c
-    image: demo
+    image: example.io/demo:v1
     args: ["--user \\"$BARE_VAR\\""]
 """
 
@@ -84,6 +105,7 @@ def make_svc(tmp, svc="demo", tracks=("k8s",), kustomization=None, pod=None,
     script = os.path.join(bindir, "svc.sh")
     shutil.copy(SVC_SH, script)
     shutil.copy(ASSERT_IMAGES, os.path.join(bindir, "assert-images.sh"))
+    shutil.copy(PVC_SHELLS, os.path.join(bindir, "pvc-shells.py"))
     return root, d, script
 
 
@@ -98,17 +120,24 @@ def run(script, *args, stdin="", env_path=None):
     )
 
 
-def stub_sudo(tmp):
+def stub_sudo(tmp, volume_exists_rc=1, down_rc=0):
     """在 tmp/stub 放一支假 sudo，回傳 (PATH 值, 紀錄檔路徑)。
 
     podman 軌走 `sudo podman kube play`，真跑會在本機起容器。假 sudo 只把參數與 stdin 寫進紀錄檔。
     測試讀紀錄檔，就知道腳本交出的子命令與渲染產物。
+    `sudo podman volume exists` 不讀 stdin，以 volume_exists_rc 結束：0 代表卷還在，1 代表已刪。
+    `sudo podman kube down` 讀完 stdin 後以 down_rc 結束。
     """
     stub = os.path.join(tmp, "stub")
     os.makedirs(stub)
     log = os.path.join(tmp, "sudo.log")
     p = os.path.join(stub, "sudo")
-    open(p, "w").write(f'#!/bin/bash\nprintf "%s\\n" "$*" >> "{log}"\ncat >> "{log}"\n')
+    open(p, "w").write(
+        f'#!/bin/bash\nprintf "%s\\n" "$*" >> "{log}"\n'
+        f'if [[ "$1 $2 $3" == "podman volume exists" ]]; then exit {volume_exists_rc}; fi\n'
+        f'cat >> "{log}"\n'
+        f'if [[ "$1 $2 $3" == "podman kube down" ]]; then exit {down_rc}; fi\n'
+    )
     os.chmod(p, 0o755)
     return stub + os.pathsep + os.environ["PATH"], log
 
@@ -169,6 +198,75 @@ def test_podman_prefixed_track_delete_goes_to_kube_down():
             got = open(log).read()
             assert got.startswith("podman kube down --force -\n"), got
             assert "image: example.io/demo:v1" in got, got
+
+
+def test_podman_delete_stream_has_pvc_shells():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 0, r.stdout + r.stderr
+        got = open(log).read()
+        assert "kind: PersistentVolumeClaim" in got and "name: demo-data" in got, got
+        assert "podman volume exists demo-data" in got, got
+
+
+def test_podman_delete_fails_when_volume_remains():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp, volume_exists_rc=0)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "demo-data" in r.stderr, r.stderr
+
+
+def test_podman_delete_passes_when_volumes_gone():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp, volume_exists_rc=1)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_podman_delete_tolerates_only_125():
+    # 125 是含 PVC 文件時觀察過的假錯誤，吸收後照樣確認卷；其他非零結束碼是真的失敗
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp, down_rc=125)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "podman volume exists demo-data" in open(log).read()
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp, down_rc=3)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "kube down" in r.stderr, r.stderr
+
+
+def test_podman_apply_stream_has_no_pvc_shells():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp)
+        r = run(script, "demo", "apply", "podman", env_path=path)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "kind: PersistentVolumeClaim" not in open(log).read()
+
+
+def test_bad_verb_does_not_create_secret_env():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
+        r = run(script, "demo", "bogus", "k8s")
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert not os.path.exists(os.path.join(d, "secret", "secret.env"))
+
+
+def test_fallback_file_mode_0600():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
+        run(script, "demo", "apply", "k8s")
+        mode = os.stat(os.path.join(d, "secret", "secret.env")).st_mode & 0o777
+        assert mode == 0o600, oct(mode)
 
 
 def test_delete_without_tty_aborts():
@@ -241,29 +339,11 @@ def test_no_fallback_when_no_example():
 
 # ---------- 渲染契約 ----------
 
-def test_short_name_resolves_to_full_reference():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp)
-        r = kustomize(os.path.join(d, "k8s"))
-        assert r.returncode == 0, r.stderr
-        assert "image: example.io/demo:v1" in r.stdout, r.stdout
-
-
 def test_bare_var_survives_render():
     with tempfile.TemporaryDirectory() as tmp:
         root, d, script = make_svc(tmp)
         r = kustomize(os.path.join(d, "k8s"))
         assert "$BARE_VAR" in r.stdout, "裸 $BARE_VAR 被動到了（機密外洩路徑）"
-
-
-def test_images_name_mismatch_is_silent_no_op():
-    # 記錄 assert-images.sh 存在的理由：name 對不上時 kustomize rc=0 且產物留短名。
-    bad = KUSTOMIZATION.replace("name: demo", "name: typo")
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, kustomization=bad)
-        r = kustomize(os.path.join(d, "k8s"))
-        assert r.returncode == 0, "kustomize 竟然報錯了——本測試的前提要重新檢視"
-        assert "image: demo" in r.stdout, r.stdout
 
 
 def test_secret_generator_name_has_no_hash_suffix():
@@ -292,25 +372,25 @@ def _run_assert(root, svc):
     )
 
 
-def test_assert_images_rejects_unresolved_short_name():
-    bad = KUSTOMIZATION.replace("name: demo", "name: typo")
+def test_assert_images_rejects_short_name():
+    bad = POD.replace("example.io/demo:v1", "demo")
     with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, kustomization=bad)
+        root, d, script = make_svc(tmp, pod=bad)
         r = _run_assert(root, "demo")
         assert r.returncode == 1, r.stdout + r.stderr
-        assert "未解析為完整參照" in r.stderr, r.stderr
+        assert "不是完整參照" in r.stderr, r.stderr
 
 
 def test_assert_images_renders_podman_prefixed_tracks():
     # 服務只有 podman 或 podman-4060ti 軌時也要渲染到。沒渲染到會落到「零個 image」。
-    # 這裡用打錯的短名，讓渲染產物帶出未解析的 image。看錯誤訊息就分得出有沒有渲染到。
-    bad = KUSTOMIZATION.replace("name: demo", "name: typo")
+    # 這裡用短名，讓渲染產物帶出不完整的 image。看錯誤訊息就分得出有沒有渲染到。
+    bad = POD.replace("example.io/demo:v1", "demo")
     for track in PODMAN_TRACKS:
         with tempfile.TemporaryDirectory() as tmp:
-            root, d, script = make_svc(tmp, tracks=(track,), kustomization=bad)
+            root, d, script = make_svc(tmp, tracks=(track,), pod=bad)
             r = _run_assert(root, "demo")
             assert r.returncode == 1, track + r.stdout + r.stderr
-            assert "未解析為完整參照" in r.stderr, track + r.stderr
+            assert "不是完整參照" in r.stderr, track + r.stderr
 
 
 def test_assert_images_rejects_zero_images():

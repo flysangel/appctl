@@ -26,7 +26,7 @@
 | `xadm-lxqt` | k8s 圖形管理工作站（LXQt via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
 | `xadm-xfce` | k8s 圖形管理工作站（XFCE4 via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
 
-- 埠是 podman 軌的 hostPort 與 k8s 的 Service 埠，卷的容量以 `services/<svc>/k8s/pvc.yaml` 為準（minio 在 `base/statefulset.yaml`）。同一台主機的 podman 軌，同埠的服務不能同時跑。
+- 埠是 podman 軌的 hostPort 與 k8s 的 Service 埠，卷的容量以 `services/<svc>/k8s/pvc.yaml` 為準（minio 在 `base/statefulset.yaml`）。同一台主機的 podman 軌，同埠的服務不能同時跑；哪些服務刻意共用同一埠、只能擇一部署，見 `config/port-groups.conf`。
 - 服務只建一個軌的目錄，就代表另一軌不支援。`ncb` 在 k8s 沒有對應物：k8s 軌的 Ingress 都只有 HTTP，沒有 `tls:`，叢集也沒有 Issuer，TLS 要不要做歸 infra-k8s 決定；`kadm`、`xadm-*` 本來就是叢集內的管理工作站。
 - 每個服務的工作負載正本在 `services/<svc>/base/`，兩軌的目錄只放各自的差異（podman 的 hostPort、k8s 的 Service、Ingress、PVC）。`minio` 是例外，原因見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈已知的結構性限制〉。
 - k8s 軌的 Ingress 主機名一律是 `<svc>.local`。有沒有 Ingress，看 `services/<svc>/k8s/ingress.yaml` 在不在。
@@ -44,7 +44,8 @@
 | `podman` 與 `sudo` | podman 軌部署。podman 軌是 rootful，查狀態與 log 也要 `sudo`；沒有 tty 時先 `sudo -v` | 走 podman 軌時 |
 | `python3` 與 PyYAML | 單元測試、`manifest-diff`、`task lint` 的四大文件與 Taskfile 檢查 | 必要 |
 | `skopeo` | `task check:image` 查映像是否還在來源 registry | 用到時 |
-| `jq`、`curl`、`nmap` | `task seed` 營運工具 | 用到時 |
+| `nmap` | gmm 的 `task seed` | 用到時 |
+| `curl` | `task smoke` 的 HTTP 探測 | 用到時 |
 | `shellcheck` | `task lint` 的靜態檢查 | 必要 |
 | `gitleaks` | push 護欄的機密掃描 | 必要 |
 
@@ -58,6 +59,7 @@ push 護欄是本 repo 自帶的 `.githooks/pre-push`，由帳號層派工 hook 
 # 有機密的服務先填真值（gitignored）。哪些服務有機密：ls services/*/secret/secret.env.example
 cp services/<svc>/secret/secret.env.example services/<svc>/secret/secret.env
 cp services/quay/secret/config.yaml.example services/quay/secret/config.yaml       # quay 另有檔案型機密，裡面的 DB 與 redis 密碼要和 secret.env 一致
+task lint:secret SVC=quay                                                          # 填完確認 quay 兩處一致，只印鍵名不印值
 ```
 
 **不填也跑得動，但跑起來的是假的。** 機密真值檔不在時，kustomize 直接失敗，所以 `bin/svc.sh` 會從 `.example` 複製一份佔位值補位，`apply` 時多印兩行 `Info:` 說明「用的不是真密碼」。這樣部署出去的服務連不上相依元件。有資料卷的服務（minio、各家的資料庫）會用佔位密碼建卷，之後換成真值時，要刪掉卷再重建。
@@ -112,10 +114,10 @@ podman 軌的 hostPort 綁主機的所有介面，同網段的其他主機都連
 # services/gmm/sync.conf 已進版控，放連線目標與非機密參數。跑 k8s 軌時，改它的 GUACAMOLE_SERVER
 cp services/gmm/sync.secret.env.example services/gmm/sync.secret.env     # guacadmin 密碼
 cp services/gmm/mapping.env.example services/gmm/mapping.env             # 連線清單（pipe 分隔，欄位照 mapping.env.example）
-task seed SVC=gmm                                                        # 唯讀檢查用 task check:seed，只驗 token、不驗 mapping.env、不寫入
+task seed SVC=gmm                                                        # 唯讀檢查用 task check:seed，驗 token 與 mapping.env 的欄數，不寫入
 ```
 
-**`task seed SVC=gmm` 有破壞性**：它會刪除 `mapping.env` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。動資料前，腳本要求輸入服務名 `gmm`。沒有 tty 時，腳本中止，什麼都不刪。它的行為：
+**`task seed SVC=gmm` 有破壞性**：它會刪除 `mapping.env` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。動資料前，腳本先印出同步計畫（要建、要覆寫、要刪的名稱），再要求輸入服務名 `gmm`。沒有 tty 時，腳本中止，什麼都不刪。它的行為：
 
 - `GUACAMOLE_SERVER` 要含 webapp 路徑 `/guacamole`。k8s 軌先 `kubectl port-forward svc/gmm 8080`，再把 URL 填進 `sync.conf`。
 - guacadmin 的初始密碼由 mariadb 映像內建的 schema 決定。第一次登入後在 UI 改掉，`sync.secret.env` 要跟著改，否則取 token 失敗。
@@ -124,7 +126,8 @@ task seed SVC=gmm                                                        # 唯�
 - 每行先用 nmap 探目標埠，沒回 open 就在名稱加 `.X`。目標關機再開機，兩次 seed 會各刪建一次。
 - 已存在的 user 不更新密碼，sharing profile 不更新，permission 只加不減；connection 已存在就整份 PUT。要移除資源只有一條路：刪 mapping 行再跑 seed。
 - 每個 user 對 group 與 connection 只拿 READ；每條 connection 固定建 `ro`、`rw` 兩個 sharing profile。
-- 腳本不看 API 回應，永遠以 0 結束。`task seed SVC=gmm` 回 0 不代表同步成功，看輸出裡有沒有「取 id 失敗，跳過」。改成檢查狀態碼列在 [docs/PROGRESS.md](docs/PROGRESS.md)。
+- `mapping.env` 有任一行欄數不對，或一筆連線都沒有，就整批中止，什麼都不改。
+- 每次 API 呼叫都檢查狀態碼。有失敗時印 `Error:`，其餘行照樣同步，最後以 1 結束。
 
 ### 查映像
 
@@ -137,7 +140,7 @@ task check:image SVC=<svc>   # 渲染產物的每個 image 都解析成完整參
 **`task delete` 不可逆。**
 
 - k8s 軌刪掉 workload 產出的全部資源，包含 manifest 內宣告的 PVC 與機密。叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料連帶消失。
-- podman 軌跑 `podman kube down --force`，pod 與具名卷一起移除。
+- podman 軌跑 `podman kube down --force`，pod 與具名卷一起移除。刪完逐一確認卷都不在，還有卷在就以 1 結束，並印出手動清除的指令。
 - 兩者執行前都要求輸入服務名確認。沒有 tty（cron、CI）時 `read` 失敗，腳本中止，什麼都不刪。
 - `StatefulSet` 的 `volumeClaimTemplates` PVC 由 k8s 動態建立，不在 manifest 內，所以不隨 `delete` 移除。腳本會列出這些 PVC，並印出手動清除的指令。
 - `delete` 不動 `services/<svc>/secret/` 的真值檔與 sync 工具的本機檔，拆掉再 `apply` 用同一份。
@@ -164,7 +167,7 @@ spec、plan、工單放在 `docs/superpowers/` 與 `docs/tickets/`，只存本�
 
 | 方向 | 對象 | 關係 |
 |---|---|---|
-| 上游 | images | 映像推上 registry 後，版號直接寫進各服務 `base/kustomization.yaml` 的 `images:` |
+| 上游 | images | 映像推上 registry 後，版號直接寫進各服務 manifest 的 `image:` |
 | 上游 | infra-k8s | 提供 k8s 軌部署用的叢集 |
 | 護欄 | 帳號層派工 hook | 呼叫本 repo 自帶的 `.githooks/pre-push` |
 

@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: grafana
-        image: grafana-grafana
+        image: quay.io/flysangel/grafana/grafana:13.1.1
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
@@ -43,7 +43,7 @@ spec:
         - name: data
           mountPath: /var/lib/grafana
       - name: mariadb
-        image: grafana-mariadb
+        image: quay.io/flysangel/library/mariadb:12.3.2
         imagePullPolicy: IfNotPresent
         args:
         - --character-set-server=utf8mb4

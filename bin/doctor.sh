@@ -54,9 +54,8 @@ fi
 want skopeo 'task check:image'
 want podman 'podman 軌的 apply、delete'
 want sudo 'podman 軌的 apply、delete'
-want jq 'task seed'
-want curl 'task seed'
 want nmap 'gmm 的 task seed'
+want curl 'task smoke'
 
 # local 或 worktree 作用域的 core.hooksPath 會讓 git 不經過帳號層派工 hook，機密掃描靜默失效
 scopes="$(git config --show-scope --get-all core.hooksPath || true)"

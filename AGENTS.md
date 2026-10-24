@@ -5,7 +5,7 @@
 ## 1. 30 秒定位
 
 - 這是容器服務的部署集，沒有應用程式碼。內容是 kustomize manifest 正本、一支部署控制腳本 `bin/svc.sh`、離線測試，以及各服務的營運工具 `sync.sh`。
-- 渲染由 kustomize 原生欄位（`namespace:`、`images:`）完成，腳本不做任何字串替換。`bin/svc.sh` 只做守衛、機密補位與確認，部署交給 `kubectl apply -k` 與 `podman kube play`。
+- 渲染由 kustomize 原生欄位（`namespace:`）完成，映像直接寫完整參照在 manifest，腳本不做任何字串替換。`bin/svc.sh` 只做守衛、機密補位與確認，部署交給 `kubectl apply -k` 與 `podman kube play`。
 - 改結構前先讀 `docs/ARCHITECTURE.md`〈依賴與資料流〉。
 - 沒有 CI，所有驗證都在本機。不要假設遠端有東西幫你擋。
 - push 護欄是本 repo 自帶的 `.githooks/pre-push`，由帳號層派工 hook 呼叫。兩層怎麼串，見 `~/.claude/rules/githooks.md`〈兩層 hook 怎麼串〉。
@@ -28,7 +28,7 @@
 ### 會刪資料的動作，先問使用者
 
 - `task delete`：k8s 軌連 manifest 內宣告的 PVC 一起刪，叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料跟著消失；podman 軌連具名卷一起移除。
-- `task seed SVC=gmm`：刪除 `mapping.env` 以外多餘的 user、group、connection。腳本動資料前要求輸入服務名，沒有 tty 時中止。欄數不對的行會印 `Error` 跳過，但 cleanup 照跑，那一行的 user、group、connection 也算「以外」，一起被刪；`task check:seed` 不驗 `mapping.env`。改成解析失敗就中止列在 `docs/PROGRESS.md`。
+- `task seed SVC=gmm`：刪除 `mapping.env` 以外多餘的 user、group、connection。腳本動資料前要求輸入服務名，沒有 tty 時中止。腳本先印計畫再確認；`mapping.env` 有任一行欄數不對或一筆都沒有時，整批中止。
 - `task delete SVC=ncb TRACK=podman`：連 `ncb-certbot` 卷刪掉，憑證一起消失。Let's Encrypt 的 rate limits 文件寫同一組網域每 7 天只簽 5 張重複憑證，刪了再簽會撞上限。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 是叢集最高權服務，帳密不能輪換。要部署前，先確認網段隔離。
 
@@ -41,17 +41,16 @@
 
 ### 加一個服務
 
-1. `services/<svc>/base/`：工作負載正本，檔名是 kind 小寫（`deployment.yaml`、`daemonset.yaml`、`pod.yaml`…）。manifest 不放機密真值，`image:` 只寫短名。
-2. `services/<svc>/base/kustomization.yaml`：`resources:` 指向工作負載，加 `images:`。`name:` 寫短名，`newName:` 寫完整 repo，`newTag:` 加雙引號；digest 型改用 `digest:`（值帶 `sha256:` 前綴），而且不給 `newTag:`。
-3. 短名一律帶服務名：單容器用 `<svc>`，多容器用 `<svc>-<容器名>`。不要用裸容器名，理由見〈`images:` 對不上時不會報錯〉。
-4. `services/<svc>/{podman,k8s}/kustomization.yaml`：`namespace: default`、`resources: [../base]`，加該軌專屬的資源（podman 的 hostPort patch；k8s 的 `service.yaml`、`ingress.yaml`、`pvc.yaml`）。podman 軌的 `hostPort` 用 JSON6902 加 `op: test`，照既有服務的 overlay 抄，不用 strategic merge。
-5. 只支援一軌，就只建一個目錄。目錄存在就代表支援。
-6. 有機密時，建 `services/<svc>/secret/`，放 `kustomization.yaml`（`secretGenerator` 加 `generatorOptions.disableNameSuffixHash: true`）與 `secret.env.example`（佔位值，進版控）。兩軌的 `resources:` 各加一行 `../secret`。沒有機密的服務不要建這個目錄：`resources` 指向不存在的目錄，kustomize 會直接失敗。
-7. 跑〈完成定義〉。
+1. `services/<svc>/base/`：工作負載正本，檔名是 kind 小寫（`deployment.yaml`、`daemonset.yaml`、`pod.yaml`…）。manifest 不放機密真值，`image:` 直接寫 mirror 的完整參照（tag 或 `@sha256:` digest）。
+2. `services/<svc>/base/kustomization.yaml`：`resources:` 指向工作負載。不寫 `images:`，`bin/check-manifests.py` 會擋。
+3. `services/<svc>/{podman,k8s}/kustomization.yaml`：`namespace: default`、`resources: [../base]`，加該軌專屬的資源（podman 的 hostPort patch；k8s 的 `service.yaml`、`ingress.yaml`、`pvc.yaml`）。podman 軌的 `hostPort` 用 JSON6902 加 `op: test`，照既有服務的 overlay 抄，不用 strategic merge。
+4. 只支援一軌，就只建一個目錄。目錄存在就代表支援。
+5. 有機密時，建 `services/<svc>/secret/`，放 `kustomization.yaml`（`secretGenerator` 加 `generatorOptions.disableNameSuffixHash: true`）與 `secret.env.example`（佔位值，進版控）。兩軌的 `resources:` 各加一行 `../secret`。沒有機密的服務不要建這個目錄：`resources` 指向不存在的目錄，kustomize 會直接失敗。
+6. 跑〈完成定義〉。
 
 ### 改映像版本
 
-改 `services/<svc>/base/kustomization.yaml` 的 `images:`。`minio` 的 podman 軌不共用 base，自帶一份 `images:`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'digest: sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。
+改 manifest 的 `image:`。`minio` 的 podman 軌不共用 base，自帶 `pod.yaml`，要一起改；juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。
 
 改完跑 `task check:image SVC=<svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。
 
@@ -60,19 +59,17 @@
 - bash：不要把 `[[ cond ]] && { ...; }` 當獨立語句。條件為假時整段回非零，日後加上 `errexit` 會靜默中止；當腳本最後一條語句時，整支腳本會以 1 結束。用 `if` 寫。既有的違規列在 `docs/PROGRESS.md`，不要順手改。
 - 不在 bash 裡解析 YAML，要解析就用 python。
 - `yq` 是 python-yq，只用 jq 相容語法，不用 `yq e`、`yq ea`、`yq eval`。
-- 語言只用 bash 與 python。bash 管流程、IO、git 膠水；python 管結構化資料驗證。
+- 語言只用 bash 與 python。bash 管流程、IO、git 膠水；python 管結構化資料驗證，營運工具要打 HTTP API 時也用 python（例如 `services/gmm/sync.py`）。
 
 ## 3. 地雷
 
-### `images:` 對不上時不會報錯
+### 映像還在不在 registry，push 時不會查
 
-manifest 的 `image:` 寫短名，完整參照在 `kustomization.yaml` 的 `images:`。`name:` 對不上時，kustomize 回 0、不警告，產物原樣留著短名。短名如果剛好是 Docker Hub 官方庫的名字（例如 `nginx`、`mariadb`、`redis`），就會拉到能正常啟動的錯映像。所以短名一律帶服務名。
-
-能擋這件事的是 `bin/assert-images.sh`，它只在 `task check:image` 跑，**push 時不會跑**：它要逐一連 registry 查映像，不是幾秒內跑得完的檢查。改了 `images:` 或 manifest 的 `image:`，要自己跑。
+`bin/check-manifests.py` 在 `task lint` 與 push 時擋短名、缺 tag 與 `latest`。映像是不是還在來源 registry，只有 `task check:image` 查，**push 時不會跑**：它要逐一連 registry，不是幾秒內跑得完的檢查。改了 manifest 的 `image:`，要自己跑。
 
 ### `services/` 底下不要寫 `docker.io/` 字面值
 
-push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它擋哪些樣式見 `.githooks/forbidden-patterns.txt`，不要把樣式抄進本檔。映像要用 mirror 的完整參照，寫在 `services/<svc>/base/kustomization.yaml` 的 `images:`。要舉例時，改講法或指路徑。哪些路徑不掃，見 `~/.claude/rules/githooks.md`〈各道掃描的例外不一樣〉。
+push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。它擋哪些樣式見 `.githooks/forbidden-patterns.txt`，不要把樣式抄進本檔。映像要用 mirror 的完整參照，直接寫在 manifest 的 `image:`。要舉例時，改講法或指路徑。哪些路徑不掃，見 `~/.claude/rules/githooks.md`〈各道掃描的例外不一樣〉。
 
 ### 手動跑 `kubectl kustomize` 前，要先備好機密檔
 
@@ -102,26 +99,22 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 ### 改了哪類檔要多驗什麼
 
 - 改了 manifest 或 `kustomization.yaml`：跑 `kubectl kustomize services/<svc>/k8s`，podman 軌同樣跑一次。先備好機密檔，見〈手動跑 `kubectl kustomize` 前，要先備好機密檔〉。
-- 改了 `images:` 或 manifest 的 `image:`：跑 `task check:image SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
-- 改動會影響很多服務的渲染時（例如改 base 的共用寫法），用 `bin/manifest-diff.py` 比對改前改後的 `kubectl kustomize` 產物。有機密的服務加 `--include-secrets`。
+- 改了 manifest 的 `image:`：跑 `task check:image SVC=<svc>`。它查渲染產物的 image 都是完整參照，而且還在來源 registry。
+- 改動會影響很多服務的渲染時（例如改 base 的共用寫法），對每個受影響的服務與軌跑 `bash bin/render-diff.sh <svc> <軌> main`，它比對 `main` 與工作樹的渲染產物，不帶機密真值。要連 Secret 的值一起比時，改用 `bin/manifest-diff.py --include-secrets` 手動比，產物檔含機密，比完就刪。
 - 改了 `.githooks/` 或 `bin/check-*.py`：照 `~/.claude/rules/githooks.md`〈改了 `.githooks/` 底下任何東西〉再跑一次真的 hook。手動跑時照 `~/.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。護欄掃這次 push 的每個 commit 的新增行，所以不要用 `git diff main..HEAD` 判斷會不會被擋：「加了又刪」的內容在淨差異裡看不見。
 
-### `task test` 回 0 不等於每支都跑了
+### 不要用 pytest 代替 `task test`
 
-`task test` 用 `python3 tests/<檔>.py` 逐支執行。新增測試檔時，要把它加進 `Taskfile.yaml` 的 `test` 任務。該任務逐行列出測試檔，不會自動收新檔。新檔的檔尾也一定要補 `__main__` 執行段，照 `tests/test_manifest_diff.py` 檔尾的寫法。少了這段，`task test` 對已列入的檔零輸出、回 0，一支都沒跑卻報成功。判斷有沒有真的在跑，看每支有沒有印 `ALL <n> PASS`。這兩個坑的消除法列在 `docs/PROGRESS.md`，做完就刪這段。
+`python3 -m pytest tests/` 會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。`task test` 只收沒被 `.gitignore` 擋掉的檔，收法見 `bin/run-tests.py` 的檔頭。
 
-`python3 -m pytest tests/` 也能跑同一批測試，但會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。
+### 真環境煙測會刪資料，先問使用者
 
-### 真環境煙測要逐條手動跑
+podman 軌的煙測是 `task smoke -- <svc>...`，步驟與各服務的探測寫在 `bin/smoke.sh`。宣稱完成前，要真的跑過並貼出輸出。
 
-煙測沒有腳本。宣稱完成前，要真的跑過並貼出輸出。寫成腳本列在 `docs/PROGRESS.md`。順序：
-
-1. `apply`。
-2. 等 pod 到 Running。podman 軌用 `sudo podman pod inspect <pod> --format '{{.State}}'`，pod 不存在時回非零。
-3. HTTP 探測。gmm：`GET /guacamole/` 回 2xx 或 3xx。grafana：`GET /api/health` 的 `.database` 是 `ok`。quay：`GET /health/instance` 回 200，第一次啟動要跑 migration，會等一陣子。ncb：`GET http://127.0.0.1/` 回 301。
-4. 登入。gmm 用 `POST /guacamole/api/tokens` 取 `authToken`。
-5. 再 `apply` 一次，重做第 2、3 步。
-6. `delete`，確認 pod 與卷都不在。
+- 最後一步是 `delete`，會刪掉該服務的卷，正式資料一起消失。跑之前先問使用者要跑哪些服務。
+- ncb、kadm、xadm-* 預設拒跑，理由見〈會刪資料的動作，先問使用者〉；要跑得加 `--allow-guarded`。
+- 每個服務的 `delete` 會要求輸入服務名，所以要有 tty，沒有 tty 時那個服務記為失敗。
+- k8s 軌沒有煙測腳本，照 `bin/smoke.sh` 的步驟手動跑。
 
 ## 5. 不要做的事
 
@@ -130,7 +123,7 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 | 沒問使用者就跑 `task delete`、`task seed SVC=gmm`，或刪 PVC | 會刪資料，不能復原 |
 | 被歷史 commit 擋 push 時，自己 squash 或改寫歷史 | 選哪條路是使用者的決定，先停下來問。HEAD 的內容也要修乾淨，squash 帶走的是 HEAD |
 | 順手改 `docs/PROGRESS.md` 列的既有違規 | 不在這次的範圍內，會讓 diff 混進無關改動 |
-| 把 `bin/svc.sh` 的 podman `delete` 容錯當成已驗證 | 那道容錯還沒在實際情況下觸發過 |
+| 繞過 `bin/svc.sh`，直接用 `podman kube down --force` 拆服務 | podman 4.9.3 只刪 `kind: Pod` 與 PVC 文件的卷，Deployment 與 DaemonSet 的卷會留著，下次 `apply` 接回舊資料。`svc.sh` 會補 PVC 殼並確認卷已刪 |
 | 「補齊」`minio` 的 podman 軌讓它共用 base | `podman kube play` 不支援 `StatefulSet`，做不到 |
 | 在 `docs/` 放四大文件以外的檔 | 沒人連得到，會和程式漂移。`docs/superpowers/` 與 `docs/tickets/` 是本機暫存，已 gitignore |
 | 把機密放進命令列、URL、scratchpad 或 commit 訊息 | 會出現在 `ps`、log 或版控 |
