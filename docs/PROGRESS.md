@@ -7,15 +7,16 @@
 - 已跑過 harness-adopt，`bin/check-docs.py` 與 `.githooks/` 是範本 repo 的新契約副本。
 - 已套用 `~/.claude/rules/directories.md`，例外列在 `docs/ARCHITECTURE.md`〈目錄結構〉。
 - 已套用 `~/.claude/rules/taskfile.md`〈分類原則〉，`bin/check-taskfile.py` 驗過。
-- 未驗證：ncb 的憑證順序、「拆 pod 留卷」的手動做法，見〈待辦〉。podman `delete` 補 PVC 殼的修法只在 rootless 實測過，rootful 還沒跑。`services/gmm/sync.py` 與 `task smoke` 還沒在真環境跑過。
+- 真環境驗過：podman `delete` 在 rootful 下會刪掉 Deployment（filebrowser）與 Pod（minio）的卷；`task smoke -- filebrowser grafana` 通過；gmm 的 `task check:seed` 對正式 gmm 取得 token，`sync.py` 跑到印出計畫為止。
+- 未驗證：ncb 的憑證順序、「拆 pod 留卷」的手動做法，見〈待辦〉。`sync.py` 的寫入路徑還沒在真環境跑過：主工作樹沒有 `mapping.env`。
 - 主工作樹的 quay `secret.env` 和 `.example` 內容相同，`task lint:secret SVC=quay` 判為佔位值。
 - blocker：沒有。
 
 ## 2. 進行中
 
 - 這個分支做什麼：保留 kustomize，用 Python 補離線檢查、gmm 同步與煙測，修 podman delete 刪卷。計畫與設計只存在主工作樹的 `docs/superpowers/`。
-- 做到哪：計畫 Task 1 到 8 完成，整個分支的 code review 跑過，必要修正已 commit。
-- 下一步：使用者決定要不要跑三個真環境驗證（gmm seed、rootful delete、`task smoke`），再 merge 回 main。
+- 做到哪：計畫 Task 1 到 8 完成，整個分支的 code review 跑過，必要修正已 commit。rootful delete 與煙測在真環境通過。
+- 下一步：使用者決定 gmm 寫入路徑要不要驗，再 merge 回 main。
 
 ## 3. 待辦
 
