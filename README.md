@@ -139,7 +139,7 @@ task check:image SVC=<svc>   # 渲染產物的每個 image 都解析成完整參
 **`task delete` 不可逆。**
 
 - k8s 軌刪掉 workload 產出的全部資源，包含 manifest 內宣告的 PVC 與機密。叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料連帶消失。
-- podman 軌跑 `podman kube down --force`，pod 與具名卷一起移除。
+- podman 軌跑 `podman kube down --force`，pod 與具名卷一起移除。刪完逐一確認卷都不在，還有卷在就以 1 結束，並印出手動清除的指令。
 - 兩者執行前都要求輸入服務名確認。沒有 tty（cron、CI）時 `read` 失敗，腳本中止，什麼都不刪。
 - `StatefulSet` 的 `volumeClaimTemplates` PVC 由 k8s 動態建立，不在 manifest 內，所以不隨 `delete` 移除。腳本會列出這些 PVC，並印出手動清除的指令。
 - `delete` 不動 `services/<svc>/secret/` 的真值檔與 sync 工具的本機檔，拆掉再 `apply` 用同一份。

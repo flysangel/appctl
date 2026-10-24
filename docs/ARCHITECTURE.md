@@ -87,7 +87,7 @@ podman 軌的 `kube play --replace` 會砍掉同名 pod 整個重建：進行中
 `delete` 多兩件事：先要求輸入服務名確認（沒有 tty 時 `read` 讀到 EOF 就中止），再跑 `kubectl delete -k --ignore-not-found` 或 `podman kube down --force -`。
 
 - k8s：`StatefulSet` 的 `volumeClaimTemplates` PVC 由叢集動態建立，不在 manifest 內，不隨 `delete` 移除。腳本刪完會列出這些 PVC，並印出手動清除的指令。
-- podman：podman 4.9.3 對含 `PersistentVolumeClaim` doc 的 yaml 跑 `kube down --force`，卷已刪掉卻以 125 結束。腳本對這個假錯誤做了容錯，理由寫在 `bin/svc.sh` 的註解。
+- podman：podman 4.9.3 的 `kube down --force` 只收 `kind: Pod` 與 PVC 文件的卷名，Deployment 與 DaemonSet 的卷會留著（rootless 實測）。腳本先用 `bin/pvc-shells.py` 替這些卷補 PVC 殼，刪完再用 `sudo podman volume exists` 逐一確認，還有卷在就以 1 結束。`kube down` 回非零時照樣往下確認，理由寫在 `bin/svc.sh` 的註解。
 
 ### 映像參照：直接寫完整參照
 
@@ -163,4 +163,3 @@ kustomize 的 load restrictor 擋裸檔案路徑，不擋目錄型 resource。`e
 - gmm 的 `REMOTE_IP_VALVE_ENABLED=true` 讓 guacamole 從 `X-Forwarded-For` 取來源 IP，`BAN_ENABLED` 的暴力登入封鎖才封得到人而不是封掉 Ingress。podman 軌前面沒有代理，客戶端自帶的 `X-Forwarded-For` 會被信任，可偽造繞過封鎖。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 經 LoadBalancer 對外開 SSH 或 RDP，與叢集最高權（`cluster-admin`）之間只隔兩樣東西：映像內建的帳密，與一把建置時留在映像層裡的 bigred 無密碼私鑰。私鑰的來龍去脈見 images 的 `docs/ARCHITECTURE.md` 裡講映像層私鑰那條，消除列在 images 的 `docs/PROGRESS.md`。本 repo 沒有在執行期改密碼，也沒有關密碼登入。只能放在信任網段。
 - `iperf3` 的 5201 埠、`juicefs` 的 S3 9005 埠沒有額外認證，只能放在信任網段。juicefs 的 metadata 是 SQLite，只能單寫；它的 minio sidecar 是單節點。
-- `bin/svc.sh` 對 podman `delete` 的 exit 125 容錯還沒實際觸發過：現在 podman 軌的產物都沒有 `PersistentVolumeClaim` doc。

@@ -1,19 +1,25 @@
 #!/bin/bash
 # svc.sh — 部署控制。用法：bash bin/svc.sh <svc> <apply|delete> <podman…|k8s>（podman… 指 podman 開頭的軌）
-# 渲染全由 kustomize 原生欄位（namespace: 與 images:）表達，本腳本不做任何字串替換。
+# 渲染全由 kustomize 原生欄位（namespace:）表達，映像直接寫完整參照在 manifest，本腳本不做任何字串替換。
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 svc="${1:?需傳服務名}"; verb="${2:?需傳 apply|delete}"; track="${3:?需傳 k8s 或 podman 開頭的軌}"
 here="${root}/services/${svc}"
 # 一道檢查同時涵蓋「服務名打錯」與「該服務無此軌」，訊息須對兩者都成立
 [[ -d "${here}/${track}" ]] || { echo "Error: 找不到 ${here}/${track}/（服務名錯誤，或 ${svc} 無 ${track} 軌）" >&2; exit 1; }
+# 動詞與軌的組合要在補位之前驗：打錯動詞時不該先在磁碟上長出佔位的機密檔
+case "${verb}:${track}" in
+  apply:k8s | apply:podman* | delete:k8s | delete:podman*) ;;
+  *) echo "Error: 用法 <apply|delete> <podman…|k8s>（podman… 指 podman 開頭的軌）" >&2; exit 1 ;;
+esac
 
 # 機密檔缺席時以 .example 佔位值補上——沒有它 kustomize build 直接失敗，
-# 連 delete 與純本地語法驗證都跑不動。
+# 連 delete 與純本地語法驗證都跑不動。補位出來的檔權限設成 0600，和真值檔一樣只給擁有者讀。
 for base in secret.env config.yaml; do
   ex="${here}/secret/${base}.example"
   [[ -f "${ex}" && ! -f "${here}/secret/${base}" ]] || continue
   cp "${ex}" "${here}/secret/${base}"
+  chmod 600 "${here}/secret/${base}"
   echo "Info: ${svc} 缺 ${base}，已從 .example 複製佔位值"
   # 用 if，讓迴圈的結束碼固定為 0。這樣之後把迴圈移到檔尾時，AND-list 條件為假也不會讓整支腳本以 1 退出。
   # 走 Info: 而非 Warning:——慣例不另設 Warn 級，警告也走 Info:
@@ -50,15 +56,26 @@ case "${verb}:${track}" in
                      | { grep -- "-${svc}-" || true; } \
                      | { grep . && echo "Info: 上列為 StatefulSet 動態 PVC，delete 不移除；如需清除請執行 kubectl delete <名稱>" || true; } ; } \
                    || echo "Info: 無法列出 PVC，請自行以 kubectl get pvc 確認是否有 StatefulSet 動態卷殘留" ;;
-  # podman 4.9.3：yaml 含 PVC 時 --force 會印 Volumes removed 後又 exit 125 no such volume，
-  # volume 其實已刪，是假錯誤（用檔案參數 100% 重現，與 stdin 無關）。set -e 下不處理會誤中止。
+  # podman 4.9.3 的 kube down --force 只收 kind: Pod 與 PVC 文件的卷名，Deployment 與 DaemonSet 的卷會留著
+  # （rootless 實測）。所以 down 的串流先經 pvc-shells.py 補 PVC 殼，刪完再逐一確認卷都不在。
+  # 曾觀察到含 PVC 文件時 --force 印 Volumes removed 後又 exit 125；容錯照留，真的失敗由後面的卷存在檢查抓。
   delete:podman*) confirm
                   # kustomize 先獨立跑：它失敗必須 fail loud，不能被下面的 || 一起吞掉。
-                  # 原本 `kustomize | podman kube down || echo` 的 || 接的是整條 pipeline，
-                  # pipefail 下 kustomize 失敗、機密檔缺席等任何原因都會被歸類成「已知假錯誤」
-                  # 而吞掉，什麼都沒刪也回報成功（rc=0）。
                   manifest="$(kubectl kustomize "${here}/${track}")"
-                  printf '%s\n' "${manifest}" | sudo podman kube down --force - \
-                    || echo "Info: kube down 回非零；podman 4.9.3 對含 PVC 的 yaml 的已知假錯誤，volume 其實已刪，請以 podman volume ls 確認" ;;
-  *) echo "Error: 用法 <apply|delete> <podman…|k8s>（podman… 指 podman 開頭的軌）" >&2; exit 1 ;;
+                  down_stream="$(printf '%s\n' "${manifest}" | python3 "${root}/bin/pvc-shells.py")"
+                  volumes="$(printf '%s\n' "${manifest}" | python3 "${root}/bin/pvc-shells.py" --names)"
+                  printf '%s\n' "${down_stream}" | sudo podman kube down --force - \
+                    || echo "Info: kube down 回非零，接著逐一確認卷是否已刪"
+                  remaining=0
+                  # 用 fd 3 餵卷名：sudo 會吃 stdin
+                  while read -r -u 3 vol; do
+                    [[ -n "${vol}" ]] || continue
+                    if sudo podman volume exists "${vol}"; then
+                      echo "Error: 卷 ${vol} 沒有刪掉，用 sudo podman volume rm ${vol} 手動清除" >&2
+                      remaining=1
+                    fi
+                  done 3< <(printf '%s\n' "${volumes}")
+                  if (( remaining != 0 )); then
+                    exit 1
+                  fi ;;
 esac

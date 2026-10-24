@@ -12,6 +12,31 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SVC_SH = os.path.join(ROOT, "bin", "svc.sh")
 ASSERT_IMAGES = os.path.join(ROOT, "bin", "assert-images.sh")
+PVC_SHELLS = os.path.join(ROOT, "bin", "pvc-shells.py")
+
+# Deployment 型 fixture，掛一個具名卷：podman 4.9.3 的 kube down --force 不收它的 claimName
+DEPLOY_WITH_PVC = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+spec:
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+      - name: c
+        image: example.io/demo:v1
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: demo-data
+"""
 
 # fixture：namespace 為字面值、image 直接寫完整參照。
 KUSTOMIZATION = """\
@@ -80,6 +105,7 @@ def make_svc(tmp, svc="demo", tracks=("k8s",), kustomization=None, pod=None,
     script = os.path.join(bindir, "svc.sh")
     shutil.copy(SVC_SH, script)
     shutil.copy(ASSERT_IMAGES, os.path.join(bindir, "assert-images.sh"))
+    shutil.copy(PVC_SHELLS, os.path.join(bindir, "pvc-shells.py"))
     return root, d, script
 
 
@@ -94,17 +120,22 @@ def run(script, *args, stdin="", env_path=None):
     )
 
 
-def stub_sudo(tmp):
+def stub_sudo(tmp, volume_exists_rc=1):
     """在 tmp/stub 放一支假 sudo，回傳 (PATH 值, 紀錄檔路徑)。
 
     podman 軌走 `sudo podman kube play`，真跑會在本機起容器。假 sudo 只把參數與 stdin 寫進紀錄檔。
     測試讀紀錄檔，就知道腳本交出的子命令與渲染產物。
+    `sudo podman volume exists` 不讀 stdin，以 volume_exists_rc 結束：0 代表卷還在，1 代表已刪。
     """
     stub = os.path.join(tmp, "stub")
     os.makedirs(stub)
     log = os.path.join(tmp, "sudo.log")
     p = os.path.join(stub, "sudo")
-    open(p, "w").write(f'#!/bin/bash\nprintf "%s\\n" "$*" >> "{log}"\ncat >> "{log}"\n')
+    open(p, "w").write(
+        f'#!/bin/bash\nprintf "%s\\n" "$*" >> "{log}"\n'
+        f'if [[ "$1 $2 $3" == "podman volume exists" ]]; then exit {volume_exists_rc}; fi\n'
+        f'cat >> "{log}"\n'
+    )
     os.chmod(p, 0o755)
     return stub + os.pathsep + os.environ["PATH"], log
 
@@ -165,6 +196,59 @@ def test_podman_prefixed_track_delete_goes_to_kube_down():
             got = open(log).read()
             assert got.startswith("podman kube down --force -\n"), got
             assert "image: example.io/demo:v1" in got, got
+
+
+def test_podman_delete_stream_has_pvc_shells():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 0, r.stdout + r.stderr
+        got = open(log).read()
+        assert "kind: PersistentVolumeClaim" in got and "name: demo-data" in got, got
+        assert "podman volume exists demo-data" in got, got
+
+
+def test_podman_delete_fails_when_volume_remains():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp, volume_exists_rc=0)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "demo-data" in r.stderr, r.stderr
+
+
+def test_podman_delete_passes_when_volumes_gone():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp, volume_exists_rc=1)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_podman_apply_stream_has_no_pvc_shells():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp)
+        r = run(script, "demo", "apply", "podman", env_path=path)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "kind: PersistentVolumeClaim" not in open(log).read()
+
+
+def test_bad_verb_does_not_create_secret_env():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
+        r = run(script, "demo", "bogus", "k8s")
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert not os.path.exists(os.path.join(d, "secret", "secret.env"))
+
+
+def test_fallback_file_mode_0600():
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
+        run(script, "demo", "apply", "k8s")
+        mode = os.stat(os.path.join(d, "secret", "secret.env")).st_mode & 0o777
+        assert mode == 0o600, oct(mode)
 
 
 def test_delete_without_tty_aborts():

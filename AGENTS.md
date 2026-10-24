@@ -125,7 +125,7 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 | 沒問使用者就跑 `task delete`、`task seed SVC=gmm`，或刪 PVC | 會刪資料，不能復原 |
 | 被歷史 commit 擋 push 時，自己 squash 或改寫歷史 | 選哪條路是使用者的決定，先停下來問。HEAD 的內容也要修乾淨，squash 帶走的是 HEAD |
 | 順手改 `docs/PROGRESS.md` 列的既有違規 | 不在這次的範圍內，會讓 diff 混進無關改動 |
-| 把 `bin/svc.sh` 的 podman `delete` 容錯當成已驗證 | 那道容錯還沒在實際情況下觸發過 |
+| 繞過 `bin/svc.sh`，直接用 `podman kube down --force` 拆服務 | podman 4.9.3 只刪 `kind: Pod` 與 PVC 文件的卷，Deployment 與 DaemonSet 的卷會留著，下次 `apply` 接回舊資料。`svc.sh` 會補 PVC 殼並確認卷已刪 |
 | 「補齊」`minio` 的 podman 軌讓它共用 base | `podman kube play` 不支援 `StatefulSet`，做不到 |
 | 在 `docs/` 放四大文件以外的檔 | 沒人連得到，會和程式漂移。`docs/superpowers/` 與 `docs/tickets/` 是本機暫存，已 gitignore |
 | 把機密放進命令列、URL、scratchpad 或 commit 訊息 | 會出現在 `ps`、log 或版控 |
