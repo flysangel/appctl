@@ -28,9 +28,16 @@ def load_groups(root):
 
 
 def copy_services(src, dst):
-    """複製 services/，secret/ 底下只帶 kustomization.yaml 與 .example，再把 .example 複製成真名。"""
+    """複製 services/，再把 .example 複製成真名。
+
+    只帶 kustomize 用得到的檔：服務根目錄的檔（sync.secret.env、mapping.env、random.csv 這類真值）一律不帶；
+    secret/ 底下只帶 kustomization.yaml 與 .example。
+    """
     def ignore(dirpath, names):
-        if "secret" not in os.path.relpath(dirpath, src).split(os.sep):
+        parts = os.path.relpath(dirpath, src).split(os.sep)
+        if len(parts) == 1 and parts[0] != ".":
+            return [n for n in names if os.path.isfile(os.path.join(dirpath, n))]
+        if "secret" not in parts:
             return []
         return [n for n in names
                 if os.path.isfile(os.path.join(dirpath, n))

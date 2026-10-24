@@ -259,6 +259,16 @@ def test_secrets_not_in_nmap_argv():
         assert ADMIN_PASS not in line and CONN_PASS not in line, line
 
 
+def test_cleanup_deletes_every_duplicate():
+    # 舊版逐筆刪 mapping 以外的項目；同名的 connection 或 group 有好幾筆時，每一筆都要刪
+    fake = Fake(connections={"7": {"name": "dup"}, "8": {"name": "dup"}},
+                groups={"5": {"name": "gdup"}, "6": {"name": "gdup"}})
+    r, fake, _, _ = run_sync(fake=fake)
+    assert r.returncode == 0, r.stdout + r.stderr
+    deleted = {p.rsplit("/", 1)[1] for m, p in mutations(fake) if m == "DELETE"}
+    assert {"5", "6", "7", "8"} <= deleted, deleted
+
+
 def test_plan_printed_before_confirm():
     r, _, _, _ = run_sync(stdin="x\n", fake=Fake(users=["stale"]))
     out = r.stdout

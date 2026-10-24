@@ -120,12 +120,13 @@ def run(script, *args, stdin="", env_path=None):
     )
 
 
-def stub_sudo(tmp, volume_exists_rc=1):
+def stub_sudo(tmp, volume_exists_rc=1, down_rc=0):
     """在 tmp/stub 放一支假 sudo，回傳 (PATH 值, 紀錄檔路徑)。
 
     podman 軌走 `sudo podman kube play`，真跑會在本機起容器。假 sudo 只把參數與 stdin 寫進紀錄檔。
     測試讀紀錄檔，就知道腳本交出的子命令與渲染產物。
     `sudo podman volume exists` 不讀 stdin，以 volume_exists_rc 結束：0 代表卷還在，1 代表已刪。
+    `sudo podman kube down` 讀完 stdin 後以 down_rc 結束。
     """
     stub = os.path.join(tmp, "stub")
     os.makedirs(stub)
@@ -135,6 +136,7 @@ def stub_sudo(tmp, volume_exists_rc=1):
         f'#!/bin/bash\nprintf "%s\\n" "$*" >> "{log}"\n'
         f'if [[ "$1 $2 $3" == "podman volume exists" ]]; then exit {volume_exists_rc}; fi\n'
         f'cat >> "{log}"\n'
+        f'if [[ "$1 $2 $3" == "podman kube down" ]]; then exit {down_rc}; fi\n'
     )
     os.chmod(p, 0o755)
     return stub + os.pathsep + os.environ["PATH"], log
@@ -224,6 +226,22 @@ def test_podman_delete_passes_when_volumes_gone():
         path, log = stub_sudo(tmp, volume_exists_rc=1)
         r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
         assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_podman_delete_tolerates_only_125():
+    # 125 是含 PVC 文件時觀察過的假錯誤，吸收後照樣確認卷；其他非零結束碼是真的失敗
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp, down_rc=125)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "podman volume exists demo-data" in open(log).read()
+    with tempfile.TemporaryDirectory() as tmp:
+        root, d, script = make_svc(tmp, tracks=("podman",), pod=DEPLOY_WITH_PVC)
+        path, log = stub_sudo(tmp, down_rc=3)
+        r = run(script, "demo", "delete", "podman", stdin="demo\n", env_path=path)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "kube down" in r.stderr, r.stderr
 
 
 def test_podman_apply_stream_has_no_pvc_shells():

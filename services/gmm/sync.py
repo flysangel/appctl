@@ -253,19 +253,26 @@ def sync_row(client, row, name, state, pass_length):
     ])
 
 
-def cleanup(client, plan, state):
+def cleanup(client, plan):
+    """刪掉計畫裡的項目。group 與 connection 重新列一次，同名的每一筆都刪，照舊版逐筆刪的語意。"""
+    targets = [("users", item, urllib.parse.quote(item)) for item in plan.delete_users]
+    try:
+        for kind, names in (("connectionGroups", set(plan.delete_groups)),
+                            ("connections", set(plan.delete_connections))):
+            if names:
+                listing = client.call("GET", kind) or {}
+                targets += [(kind, v.get("name"), k) for k, v in sorted(listing.items()) if v.get("name") in names]
+    except ApiError as e:
+        print(f"Error: 清理前重新列出項目失敗：{e}", file=sys.stderr)
+        return 1
     failed = 0
-    for kind, items, ids in (("users", plan.delete_users, None),
-                             ("connectionGroups", plan.delete_groups, state.groups),
-                             ("connections", plan.delete_connections, state.connections)):
-        for item in items:
-            ident = urllib.parse.quote(item) if ids is None else ids.get(item)
-            try:
-                client.call("DELETE", f"{kind}/{ident}")
-                print(f"Info: delete {kind} {item}")
-            except ApiError as e:
-                print(f"Error: delete {kind} {item} 失敗：{e}", file=sys.stderr)
-                failed += 1
+    for kind, item, ident in targets:
+        try:
+            client.call("DELETE", f"{kind}/{ident}")
+            print(f"Info: delete {kind} {item}")
+        except ApiError as e:
+            print(f"Error: delete {kind} {item} 失敗：{e}", file=sys.stderr)
+            failed += 1
     return failed
 
 
@@ -325,7 +332,7 @@ def main(argv):
         except ApiError as e:
             print(f"Error: {row.userAccount} 這一行同步失敗：{e}", file=sys.stderr)
             failed += 1
-    failed += cleanup(client, plan, state)
+    failed += cleanup(client, plan)
     if failed:
         print(f"Error: sync 有 {failed} 處失敗，見上方 Error:", file=sys.stderr)
         return 1

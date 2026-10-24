@@ -156,6 +156,25 @@ def test_secret_service_renders_with_example_only():
     assert not leaked, "假 repo 裡長出了 secret.env"
 
 
+def test_copy_skips_service_root_files():
+    # mapping.env、random.csv、sync.secret.env 放在服務根目錄，kustomize 用不到，不能進暫存目錄
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("check_services", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src", "services")
+        service(os.path.join(tmp, "src"), "a", podman={"podman": 8080}, secret=True)
+        for name in ("mapping.env", "random.csv", "sync.secret.env"):
+            write(os.path.join(src, "a", name), "REAL\n")
+        write(os.path.join(src, "a", "secret", "secret.env"), "PASS=REAL\n")
+        dst = os.path.join(tmp, "dst")
+        mod.copy_services(src, dst)
+        for name in ("mapping.env", "random.csv", "sync.secret.env"):
+            assert not os.path.exists(os.path.join(dst, "a", name)), name
+        assert open(os.path.join(dst, "a", "secret", "secret.env")).read() == "PASS=changeme\n"
+
+
 if __name__ == "__main__":
     fns = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in fns:

@@ -37,19 +37,27 @@ if [[ "$2" == apply && " ${{FAIL_APPLY:-}} " == *" $1 "* ]]; then exit 1; fi
 exit 0
 """
 
-# 假 sudo：記下參數；pod inspect 一律 Running，pod exists 一律回 1（已刪）
+# 假 sudo：記下參數；pod inspect 印 POD_STATE（預設 Running），pod exists 一律回 1（已刪）
 FAKE_SUDO = """\
 #!/bin/bash
 printf 'sudo %s\\n' "$*" >> "{log}"
 case "$*" in
-  "podman pod inspect "*) echo Running ;;
+  "podman pod inspect "*) echo "${{POD_STATE:-Running}}" ;;
   "podman pod exists "*) exit 1 ;;
 esac
 exit 0
 """
 
+# 假 curl：前 CURL_FAILS 次回 000，之後回 200；只支援 -w '%{{http_code}}' 的用法
+FAKE_CURL = """\
+#!/bin/bash
+n=$(cat "{count}" 2>/dev/null || echo 0)
+echo $((n + 1)) > "{count}"
+if (( n < ${{CURL_FAILS:-0}} )); then printf '000'; else printf '200'; fi
+"""
 
-def run(args, services=("a", "b"), fail_apply="", no_podman=()):
+
+def run(args, services=("a", "b"), fail_apply="", no_podman=(), extra_env=None):
     with tempfile.TemporaryDirectory() as tmp:
         repo = os.path.join(tmp, "repo")
         os.makedirs(os.path.join(repo, "bin"))
@@ -65,8 +73,11 @@ def run(args, services=("a", "b"), fail_apply="", no_podman=()):
         stub = os.path.join(tmp, "stub")
         os.makedirs(stub)
         open(os.path.join(stub, "sudo"), "w").write(FAKE_SUDO.format(log=log))
-        os.chmod(os.path.join(stub, "sudo"), 0o755)
+        open(os.path.join(stub, "curl"), "w").write(FAKE_CURL.format(count=os.path.join(tmp, "curl.count")))
+        for name in ("sudo", "curl"):
+            os.chmod(os.path.join(stub, name), 0o755)
         env = dict(os.environ, PATH=stub + os.pathsep + os.environ["PATH"], FAIL_APPLY=fail_apply)
+        env.update(extra_env or {})
         r = subprocess.run(["bash", os.path.join(repo, "bin", "smoke.sh"), *args],
                            capture_output=True, text=True, env=env, input="")
         calls = open(log).read().splitlines() if os.path.exists(log) else []
@@ -98,6 +109,18 @@ def test_apply_failure_cleans_and_continues():
     assert r.returncode == 1, r.stdout + r.stderr
     assert "sudo podman pod rm -f a-pod" in calls, calls
     assert "svc b delete podman" in calls, calls
+
+
+def test_not_running_cleans_pod():
+    r, calls = run(["a"], services=("a",), extra_env={"POD_STATE": "Degraded", "SMOKE_TIMEOUT": "2"})
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "sudo podman pod rm -f a-pod" in calls, calls
+
+
+def test_probe_retries_until_ready():
+    # gmm 的 HTTP 探測前兩次回 000，第三次回 200；不重試就會誤判失敗
+    r, calls = run(["gmm"], services=("gmm",), extra_env={"CURL_FAILS": "2", "SMOKE_PROBE_INTERVAL": "0"})
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_all_pass_rc0():

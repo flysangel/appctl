@@ -55,42 +55,55 @@ http_code() {
   curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1" || true
 }
 
-probe() {
+# 探一次；成功回 0。沒有探測的服務直接回 0
+probe_once() {
   local svc="$1"
-  local code health waited
+  local code health
 
   case "${svc}" in
     gmm)
       code="$(http_code http://127.0.0.1:8080/guacamole/)"
-      [[ "${code}" == 2* || "${code}" == 3* ]] || { echo "Error: gmm GET /guacamole/ 回 ${code}" >&2; return 1; }
+      [[ "${code}" == 2* || "${code}" == 3* ]]
       ;;
     grafana)
       health="$(curl -s --max-time 10 http://127.0.0.1:3000/api/health || true)"
-      if ! printf '%s' "${health}" | python3 -c 'import json,sys; sys.exit(json.load(sys.stdin).get("database") != "ok")' 2>/dev/null; then
-        echo "Error: grafana /api/health 的 database 不是 ok" >&2
-        return 1
-      fi
+      printf '%s' "${health}" | python3 -c 'import json,sys; sys.exit(json.load(sys.stdin).get("database") != "ok")' 2>/dev/null
       ;;
     quay)
-      # 第一次啟動要跑 migration，最多等 600 秒
-      waited=0
-      code="$(http_code http://127.0.0.1:8080/health/instance)"
-      while [[ "${code}" != 200 ]] && (( waited < 600 )); do
-        sleep 10
-        (( waited += 10 ))
-        code="$(http_code http://127.0.0.1:8080/health/instance)"
-      done
-      [[ "${code}" == 200 ]] || { echo "Error: quay /health/instance 回 ${code}" >&2; return 1; }
+      [[ "$(http_code http://127.0.0.1:8080/health/instance)" == 200 ]]
       ;;
     ncb)
-      code="$(http_code http://127.0.0.1/)"
-      [[ "${code}" == 301 ]] || { echo "Error: ncb GET / 回 ${code}，要 301" >&2; return 1; }
+      [[ "$(http_code http://127.0.0.1/)" == 301 ]]
       ;;
     *)
-      echo "Info: ${svc} 沒有 HTTP 探測，只確認 pod 是 Running"
+      return 0
       ;;
   esac
-  return 0
+}
+
+# pod 剛到 Running 時服務多半還沒聽埠，探測要重試到逾時
+probe() {
+  local svc="$1"
+  local timeout="$2"
+  local interval="${SMOKE_PROBE_INTERVAL:-5}"
+  local waited=0
+
+  case "${svc}" in
+    gmm | grafana | quay | ncb) ;;
+    *)
+      echo "Info: ${svc} 沒有 HTTP 探測，只確認 pod 是 Running"
+      return 0
+      ;;
+  esac
+  until probe_once "${svc}"; do
+    if (( waited >= timeout )); then
+      echo "Error: ${svc} 的 HTTP 探測等了 ${timeout} 秒還沒通過，探測內容見 bin/smoke.sh 的 probe_once" >&2
+      return 1
+    fi
+    sleep "${interval}"
+    (( waited += interval > 0 ? interval : 1 ))
+  done
+  echo "Info: ${svc} HTTP 探測通過"
 }
 
 login() {
@@ -122,29 +135,31 @@ check_once() {
   local timeout="$3"
 
   wait_running "${pod}" "${timeout}" || return 1
-  probe "${svc}" || return 1
+  probe "${svc}" "${timeout}" || return 1
   login "${svc}" || return 1
 }
 
 smoke_one() {
   local svc="$1"
-  local pod timeout pass
+  local pod timeout round
 
   pod="$(kubectl kustomize "${ROOT}/services/${svc}/podman" 2>/dev/null | python3 -c "${POD_NAME_PY}" || true)"
   [[ -n "${pod}" ]] || { echo "Error: ${svc} 渲染不出工作負載，取不到 pod 名" >&2; return 1; }
+  # quay 第一次啟動要跑 migration，等比較久；SMOKE_TIMEOUT 可以覆寫
   timeout=120
   if [[ "${svc}" == quay ]]; then
     timeout=600
   fi
+  timeout="${SMOKE_TIMEOUT:-${timeout}}"
 
-  for pass in 1 2; do
-    echo "Info: ${svc} 第 ${pass} 次 apply"
-    if ! bash "${ROOT}/bin/svc.sh" "${svc}" apply podman; then
-      echo "Error: ${svc} apply 失敗，清掉建一半的 ${pod}" >&2
+  for round in 1 2; do
+    echo "Info: ${svc} 第 ${round} 次 apply"
+    # apply、等待或探測任一步失敗都清掉 pod，免得占著 hostPort 讓下一個服務連鎖失敗；卷留著
+    if ! bash "${ROOT}/bin/svc.sh" "${svc}" apply podman || ! check_once "${svc}" "${pod}" "${timeout}"; then
+      echo "Error: ${svc} 第 ${round} 次檢查失敗，清掉 ${pod}（卷留著）" >&2
       sudo podman pod rm -f "${pod}" >/dev/null 2>&1 || true
       return 1
     fi
-    check_once "${svc}" "${pod}" "${timeout}" || return 1
   done
 
   # svc.sh 的 delete 會要求輸入服務名，並在刪完確認卷都不在

@@ -64,8 +64,14 @@ case "${verb}:${track}" in
                   manifest="$(kubectl kustomize "${here}/${track}")"
                   down_stream="$(printf '%s\n' "${manifest}" | python3 "${root}/bin/pvc-shells.py")"
                   volumes="$(printf '%s\n' "${manifest}" | python3 "${root}/bin/pvc-shells.py" --names)"
-                  printf '%s\n' "${down_stream}" | sudo podman kube down --force - \
-                    || echo "Info: kube down 回非零，接著逐一確認卷是否已刪"
+                  down_rc=0
+                  printf '%s\n' "${down_stream}" | sudo podman kube down --force - || down_rc=$?
+                  case "${down_rc}" in
+                    0) ;;
+                    125) echo "Info: kube down 回 125（含 PVC 文件時觀察過的假錯誤），接著逐一確認卷是否已刪" ;;
+                    *) echo "Error: kube down 回 ${down_rc}，pod 或卷可能沒刪乾淨，用 sudo podman pod ps 與 sudo podman volume ls 確認" >&2
+                       exit 1 ;;
+                  esac
                   remaining=0
                   # 用 fd 3 餵卷名：sudo 會吃 stdin
                   while read -r -u 3 vol; do
