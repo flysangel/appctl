@@ -107,16 +107,14 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 
 `python3 -m pytest tests/` 會一起收到本機不進版控的 finetune 測試，結果和 `task test` 不一定相同。`task test` 只收沒被 `.gitignore` 擋掉的檔，收法見 `bin/run-tests.py` 的檔頭。
 
-### 真環境煙測要逐條手動跑
+### 真環境煙測會刪資料，先問使用者
 
-煙測沒有腳本。宣稱完成前，要真的跑過並貼出輸出。寫成腳本列在 `docs/PROGRESS.md`。順序：
+podman 軌的煙測是 `task smoke -- <svc>...`，步驟與各服務的探測寫在 `bin/smoke.sh`。宣稱完成前，要真的跑過並貼出輸出。
 
-1. `apply`。
-2. 等 pod 到 Running。podman 軌用 `sudo podman pod inspect <pod> --format '{{.State}}'`，pod 不存在時回非零。
-3. HTTP 探測。gmm：`GET /guacamole/` 回 2xx 或 3xx。grafana：`GET /api/health` 的 `.database` 是 `ok`。quay：`GET /health/instance` 回 200，第一次啟動要跑 migration，會等一陣子。ncb：`GET http://127.0.0.1/` 回 301。
-4. 登入。gmm 用 `POST /guacamole/api/tokens` 取 `authToken`。
-5. 再 `apply` 一次，重做第 2、3 步。
-6. `delete`，確認 pod 與卷都不在。
+- 最後一步是 `delete`，會刪掉該服務的卷，正式資料一起消失。跑之前先問使用者要跑哪些服務。
+- ncb、kadm、xadm-* 預設拒跑，理由見〈會刪資料的動作，先問使用者〉；要跑得加 `--allow-guarded`。
+- 每個服務的 `delete` 會要求輸入服務名，所以要有 tty，沒有 tty 時那個服務記為失敗。
+- k8s 軌沒有煙測腳本，照 `bin/smoke.sh` 的步驟手動跑。
 
 ## 5. 不要做的事
 

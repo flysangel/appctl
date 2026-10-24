@@ -32,8 +32,21 @@ tasks:
       - python3 bin/check-manifests.py
       - python3 bin/check-services.py
       - python3 bin/check-examples.py
-      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh services/gmm/sync.sh
+      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh bin/smoke.sh services/gmm/sync.sh
       - shellcheck -S warning .githooks/pre-push
+
+  smoke:
+    # 確認由腳本負責：bin/svc.sh
+    desc: "[開發]【破壞性】podman 軌煙測：apply、探測、再 apply、delete，delete 會刪卷（用法：task smoke -- gmm grafana）"
+    summary: |
+      轉派至 bin/smoke.sh。每個服務的 delete 都經 bin/svc.sh，會要求輸入服務名確認。
+      ncb、kadm、xadm-* 預設拒跑，要加 --allow-guarded。沒有 podman 軌的服務直接跳過。
+      一個服務失敗記錄後繼續跑下一個，全部跑完才決定結束碼。
+    preconditions:
+      - sh: "[ -n '{{.CLI_ARGS}}' ]"
+        msg: "用法：task smoke -- gmm grafana（未提供服務名）"
+    cmds:
+      - bash bin/smoke.sh {{.CLI_ARGS}}
 
   lint:secret:
     desc: "[開發] 比對機密真值在各檔之間一致，只印鍵名不印值（用法：task lint:secret SVC=quay）"

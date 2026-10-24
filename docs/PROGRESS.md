@@ -14,7 +14,8 @@
 
 - 這個分支做什麼：保留 kustomize，用 Python 補離線檢查、gmm 同步與煙測，修 podman delete 刪卷。計畫與設計只存在主工作樹的 `docs/superpowers/`。
 - 做到哪：計畫 Task 1 到 6 完成。最近一項是 podman delete 補 PVC 殼並確認卷已刪，`svc.sh` 先驗動詞再補位；缺陷用 rootless 實測證實。主工作樹的 quay `secret.env` 和 `.example` 相同，是佔位值，要使用者處理。gmm 真環境 seed 還沒跑。
-- 下一步：podman 軌煙測腳本（計畫 Task 7）。
+- 也完成 Task 7：`task smoke -- <svc>...` 跑 podman 軌煙測，還沒在真環境跑過。
+- 下一步：跨 revision 的渲染比對（計畫 Task 8）。
 
 ## 3. 待辦
 
@@ -27,7 +28,6 @@
 - quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`task apply` 回來時 quay 還沒就緒
 - grafana 的 admin 密碼納入 `secret/secret.env`（`GF_SECURITY_ADMIN_PASSWORD`），不再用上游預設 admin/admin。做完改 `README.md`〈grafana 的第一次登入〉
 - 決定 ncb 的 certbot 容器去留：`server_name` 是 `ncb.local`，ACME 不簽，手放的憑證沒有 renewal 設定檔，`renew` 迴圈等於沒做事。拿掉容器，或改成公網網域（公網 DNS 不在本 repo 範圍）。做完改 `docs/ARCHITECTURE.md`〈已知的結構性限制〉ncb 那條與 `README.md`〈ncb 的憑證〉
-- 把 `AGENTS.md`〈真環境煙測要逐條手動跑〉的手動煙測清單寫成 podman 軌腳本（apply → 等 Running → 探測 → 登入 → 再 apply → delete → 確認 pod 與卷不在），一個服務失敗記錄後繼續跑下一個，結尾才決定退出碼；放進 Taskfile。做完改 `AGENTS.md`〈真環境煙測要逐條手動跑〉
 - 安裝 `yamllint`，對全部 `kustomization.yaml` 跑一次語法檢查
 
 **以下有觸發條件才做：**
