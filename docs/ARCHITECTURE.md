@@ -24,7 +24,13 @@ bin/
   svc.sh                   部署控制腳本
   assert-images.sh         讀 kubectl kustomize 產物：每個 image 都還在來源 registry
   check-manifests.py       讀 services/ 的 YAML 原始檔：每個 image 都是完整參照，kustomization 沒有 images:
+  check-services.py        只帶 .example 渲染各軌：namespace、同主機撞埠、cluster-admin 服務的 LB 來源網段
+  check-examples.py        services/*/secret/ 的 .example 範本都沒被 .gitignore 擋掉
+  run-tests.py             task test 的執行器：收集 tests/test_*.py，每支都要印 ALL <n> PASS
   manifest-diff.py         語意零漂移比對器（大改時用，不在日常流程）
+
+config/
+  port-groups.conf         同一台主機上刻意共用 hostPort、只能擇一部署的服務組
 
 .gitattributes             腳本強制 LF
 tests/                     離線單元測試
@@ -46,7 +52,7 @@ services/<svc>/
   mapping.env.example      （僅 gmm）連線清單範本；真檔 mapping.env 與 seed 產出的 random.csv 都 gitignored
 ```
 
-目錄與副檔名照 `~/.claude/rules/directories.md`。沒有 `config/`：每份設定都只給一個服務用，留在 `services/<svc>/`。
+目錄與副檔名照 `~/.claude/rules/directories.md`。只給一個服務用的設定留在 `services/<svc>/`；跨服務的設定放 `config/`，清單用 `ls config/` 查。
 
 下面這些檔不用 `.conf`、`.env` 或 `.json`：
 
@@ -140,7 +146,7 @@ kustomize 的 load restrictor 擋裸檔案路徑，不擋目錄型 resource。`e
 | podman 軌的 hostPort 都不設 hostIP，綁主機全部介面，對實驗室網段開放 | 實驗室其他主機要直接連服務；manifest 不寫死主機 IP，換主機照用 | 每個 hostPort 都是 HTTP 明文：gmm 的登入密碼與遠端桌面帳密都明文傳送；主機沒有防火牆，連得到主機的網段都能連每個 hostPort | 無程式擋 |
 | 動詞固定（清單用 `task --list-all` 查），服務與軌用 `SVC=`、`TRACK=` 帶入，不每服務開一份 taskfile | 服務多了 taskfile 不會跟著長；`includes` 與 `dir:` 的路徑坑一次都不用踩 | `task --list-all` 看不出有哪些服務，要 `ls services/` | 無程式擋 |
 | `bin/svc.sh` 不做 preflight，只驗 `services/<svc>/<軌>/` 目錄存在 | sudo、工具、埠占用、同名 pod 的檢查 kubectl 與 podman 自己都會報 | 錯誤訊息來自 kubectl 或 podman，不是腳本；hostPort 被占時建一半的 pod 會留著，見 `AGENTS.md`〈地雷〉 | `tests/test_svc.py` 的 `test_missing_track_dir_fails` 擋下目錄守衛失效；不加其他 preflight 這件事，無程式擋 |
-| 全部服務部署到 `default` namespace，腳本不建 namespace | 單一環境不需要用 namespace 隔離；`delete` 列 PVC 時可以寫死 `-n default` | overlay 的 `namespace:` 改成叢集沒有的名字，`apply -k` 直接失敗 | 無程式擋 |
+| 全部服務部署到 `default` namespace，腳本不建 namespace | 單一環境不需要用 namespace 隔離；`delete` 列 PVC 時可以寫死 `-n default` | overlay 的 `namespace:` 改成叢集沒有的名字，`apply -k` 直接失敗 | `bin/check-services.py` 擋 overlay 的 `namespace:` 不是 `default` |
 | 營運工具（`task seed`）在操作者主機跑 `services/<svc>/sync.sh`，不放進叢集排程 | 機密從本機 gitignored 檔讀，manifest 不放真值，也不在執行期 clone repo | 要排程得靠主機的 cron；各 `sync.sh` 要的工具得裝在主機上（見 `README.md`〈安裝〉） | 無程式擋 |
 | quay 的 quay-app、postgres、redis 放同一個 pod | config.yaml 的 DB 與 redis host 都寫 `127.0.0.1`，兩軌共用同一份，不必由 overlay 改寫 | 三容器沒有啟動順序控制（待辦在 `docs/PROGRESS.md`）；quay-app 不能獨立擴 | 無程式擋 |
 | podman 軌用具名卷，不用 hostPath | 免掉建目錄、`setfacl` 給容器 uid 寫入權、清理白名單、`.gitignore` 排除 runtime 目錄四件事；所有權與生命週期由 podman 管 | 資料不在 repo 目錄下，取檔要 `sudo podman volume inspect` 找 mountpoint，備份走 `podman volume export` | 無程式擋 |

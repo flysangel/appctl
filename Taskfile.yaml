@@ -25,11 +25,13 @@ tasks:
       - bash bin/doctor.sh
 
   lint:
-    desc: "[開發] 離線靜態檢查：四大文件、Taskfile、manifest 的 image、shellcheck"
+    desc: "[開發] 離線靜態檢查：四大文件、Taskfile、manifest 的 image、服務層規則、機密範本、shellcheck"
     cmds:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
       - python3 bin/check-manifests.py
+      - python3 bin/check-services.py
+      - python3 bin/check-examples.py
       - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh services/gmm/sync.sh
       - shellcheck -S warning .githooks/pre-push
 

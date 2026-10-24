@@ -26,7 +26,7 @@
 | `xadm-lxqt` | k8s 圖形管理工作站（LXQt via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
 | `xadm-xfce` | k8s 圖形管理工作站（XFCE4 via xrdp） | — | ✓ | 33890→3389、22100→22 | wk |
 
-- 埠是 podman 軌的 hostPort 與 k8s 的 Service 埠，卷的容量以 `services/<svc>/k8s/pvc.yaml` 為準（minio 在 `base/statefulset.yaml`）。同一台主機的 podman 軌，同埠的服務不能同時跑。
+- 埠是 podman 軌的 hostPort 與 k8s 的 Service 埠，卷的容量以 `services/<svc>/k8s/pvc.yaml` 為準（minio 在 `base/statefulset.yaml`）。同一台主機的 podman 軌，同埠的服務不能同時跑；哪些服務刻意共用同一埠、只能擇一部署，見 `config/port-groups.conf`。
 - 服務只建一個軌的目錄，就代表另一軌不支援。`ncb` 在 k8s 沒有對應物：k8s 軌的 Ingress 都只有 HTTP，沒有 `tls:`，叢集也沒有 Issuer，TLS 要不要做歸 infra-k8s 決定；`kadm`、`xadm-*` 本來就是叢集內的管理工作站。
 - 每個服務的工作負載正本在 `services/<svc>/base/`，兩軌的目錄只放各自的差異（podman 的 hostPort、k8s 的 Service、Ingress、PVC）。`minio` 是例外，原因見 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)〈已知的結構性限制〉。
 - k8s 軌的 Ingress 主機名一律是 `<svc>.local`。有沒有 Ingress，看 `services/<svc>/k8s/ingress.yaml` 在不在。

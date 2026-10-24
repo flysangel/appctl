@@ -13,8 +13,8 @@
 ## 2. 進行中
 
 - 這個分支做什麼：保留 kustomize，用 Python 補離線檢查、gmm 同步與煙測，修 podman delete 刪卷。計畫與設計只存在主工作樹的 `docs/superpowers/`。
-- 做到哪：映像改寫完整參照，刪掉 `images:`，`bin/check-manifests.py` 掛進 lint 與 pre-push（計畫 Task 2）。
-- 下一步：服務層離線驗證器（計畫 Task 3）。
+- 做到哪：新增 `bin/check-services.py`（lint 與 pre-push）與 `bin/check-examples.py`（只在 lint），同埠互斥清單搬到 `config/port-groups.conf`（計畫 Task 3）。
+- 下一步：quay 機密一致性檢查（計畫 Task 4）。
 
 ## 3. 待辦
 
