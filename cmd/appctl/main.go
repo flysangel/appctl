@@ -9,14 +9,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/flysangel/appctl/internal/bundle"
 	"github.com/flysangel/appctl/internal/check"
 	"github.com/flysangel/appctl/internal/k8s"
 	"github.com/flysangel/appctl/internal/podman"
-	"github.com/flysangel/appctl/internal/quadlet"
 	"github.com/flysangel/appctl/internal/render"
 	"github.com/flysangel/appctl/internal/repo"
 	"github.com/flysangel/appctl/internal/run"
-	"github.com/flysangel/appctl/internal/setting"
 	"github.com/flysangel/appctl/internal/smoke"
 )
 
@@ -135,7 +134,7 @@ func runVerb(verb string, args []string) error {
 		fmt.Printf("Success: 已停止 %s（%s），資料卷保留\n", svc, track)
 		return nil
 	}
-	b, err := translate(root, svc, track)
+	b, err := bundle.Translate(root, svc, track)
 	if err != nil {
 		return err
 	}
@@ -189,22 +188,6 @@ func runK8s(ctx context.Context, verb, root, svc, track string) error {
 	}
 	fmt.Printf("Success: 已刪除 %s（%s），含資料卷\n", svc, track)
 	return nil
-}
-
-func translate(root, svc, track string) (*quadlet.Bundle, error) {
-	out, err := render.Render(root, svc, track)
-	if err != nil {
-		return nil, err
-	}
-	docs, err := render.Docs(out)
-	if err != nil {
-		return nil, err
-	}
-	s, err := setting.Load(root, svc, track)
-	if err != nil {
-		return nil, err
-	}
-	return quadlet.Translate(svc, docs, s)
 }
 
 // runCheck 跑離線靜態檢查：manifest 的 image 與服務層規則。

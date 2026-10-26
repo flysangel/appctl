@@ -50,6 +50,8 @@ type harness struct {
 	opt  options
 	srv  *httptest.Server
 	hits atomic.Int32
+	// ports 記下探測與登入用過的埠
+	ports []int
 	// handler 處理探測與登入的 HTTP 請求；測試可換掉
 	handler http.HandlerFunc
 }
@@ -84,7 +86,10 @@ func newHarness(t *testing.T, noPodman ...string) *harness {
 			Timeout:       2 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
-		url:       func(port int, path string) string { return h.srv.URL + path },
+		url: func(port int, path string) string {
+			h.ports = append(h.ports, port)
+			return h.srv.URL + path
+		},
 		pollEvery: time.Millisecond,
 		interval:  time.Millisecond,
 		timeout:   func(string) time.Duration { return 100 * time.Millisecond },
@@ -320,18 +325,19 @@ func TestSmokeStopsServiceOnFailure(t *testing.T) {
 func TestProbeTargets(t *testing.T) {
 	cases := []struct {
 		svc, path string
+		port      int
 		reply     func(w http.ResponseWriter)
 		pass      bool
 	}{
-		{"gmm", "/guacamole/", func(w http.ResponseWriter) { w.WriteHeader(302) }, true},
-		{"gmm", "/guacamole/", func(w http.ResponseWriter) { w.WriteHeader(500) }, false},
-		{"grafana", "/api/health", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"database":"ok"}`)) }, true},
-		{"grafana", "/api/health", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"database":"x"}`)) }, false},
-		{"grafana", "/api/health", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`not json`)) }, false},
-		{"quay", "/health/instance", func(w http.ResponseWriter) { w.WriteHeader(200) }, true},
-		{"quay", "/health/instance", func(w http.ResponseWriter) { w.WriteHeader(204) }, false},
-		{"ncb", "/", func(w http.ResponseWriter) { w.WriteHeader(301) }, true},
-		{"ncb", "/", func(w http.ResponseWriter) { w.WriteHeader(200) }, false},
+		{"gmm", "/guacamole/", 8080, func(w http.ResponseWriter) { w.WriteHeader(302) }, true},
+		{"gmm", "/guacamole/", 8080, func(w http.ResponseWriter) { w.WriteHeader(500) }, false},
+		{"grafana", "/api/health", 3000, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"database":"ok"}`)) }, true},
+		{"grafana", "/api/health", 3000, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"database":"x"}`)) }, false},
+		{"grafana", "/api/health", 3000, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`not json`)) }, false},
+		{"quay", "/health/instance", 8080, func(w http.ResponseWriter) { w.WriteHeader(200) }, true},
+		{"quay", "/health/instance", 8080, func(w http.ResponseWriter) { w.WriteHeader(204) }, false},
+		{"ncb", "/", 80, func(w http.ResponseWriter) { w.WriteHeader(301) }, true},
+		{"ncb", "/", 80, func(w http.ResponseWriter) { w.WriteHeader(200) }, false},
 	}
 	for _, c := range cases {
 		h := newHarness(t)
@@ -347,6 +353,11 @@ func TestProbeTargets(t *testing.T) {
 		err := h.run([]string{c.svc}, true)
 		if (err == nil) != c.pass {
 			t.Errorf("%s %v：通過=%v，期望 %v\n%s", c.svc, c.path, err == nil, c.pass, h.out)
+		}
+		for _, p := range h.ports {
+			if p != c.port {
+				t.Errorf("%s 探測埠 = %d，期望 %d", c.svc, p, c.port)
+			}
 		}
 		if p, _ := gotPath.Load().(string); p != c.path {
 			t.Errorf("%s 探測路徑 = %q，期望 %q", c.svc, p, c.path)
@@ -393,7 +404,7 @@ func tokenHandler(t *testing.T, token string, seen *atomic.Int32) http.HandlerFu
 			t.Error(err)
 		}
 		if r.PostForm.Get("username") != "guacadmin" || r.PostForm.Get("password") != fakePass {
-			t.Errorf("登入表單不對：%v", r.PostForm)
+			t.Errorf("登入表單不對（username=%q）", r.PostForm.Get("username"))
 		}
 		_, _ = w.Write([]byte(`{"authToken":"` + token + `"}`))
 	}
@@ -407,6 +418,14 @@ func TestLoginGmm(t *testing.T) {
 	h.handler = tokenHandler(t, "tok-example", &seen)
 	if err := h.run([]string{"gmm"}, false); err != nil {
 		t.Fatalf("登入應成功：%v\n%s", err, h.out)
+	}
+	if len(h.ports) == 0 {
+		t.Error("沒有記到任何埠")
+	}
+	for _, p := range h.ports {
+		if p != 8080 {
+			t.Errorf("gmm 探測與登入應用 8080：%d", p)
+		}
 	}
 	if seen.Load() != 2 {
 		t.Errorf("兩次 apply 後各登入一次：%d", seen.Load())
@@ -461,6 +480,22 @@ func TestDeleteWithoutTTYRecordsFailure(t *testing.T) {
 	err := h.run([]string{"a", "b"}, false)
 	if err == nil || !strings.Contains(err.Error(), "a b") {
 		t.Fatalf("delete 確認失敗應記為失敗且繼續下一個：%v", err)
+	}
+}
+
+func TestSmokeStopsServiceWhenDeleteFails(t *testing.T) {
+	h := newHarness(t)
+	h.addService(t, "a", "podman")
+	h.env.Confirm = func(*os.File, io.Writer, string, string) error { return errors.New("需要 tty") }
+	if err := h.run([]string{"a"}, false); err == nil {
+		t.Fatal("delete 失敗應回錯")
+	}
+	lines := h.fake.Lines()
+	if !has(lines, "systemctl stop") {
+		t.Errorf("delete 失敗後應停掉服務：%v", lines)
+	}
+	if has(lines, "podman volume rm") {
+		t.Errorf("要留卷：%v", lines)
 	}
 }
 

@@ -18,12 +18,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flysangel/appctl/internal/bundle"
 	"github.com/flysangel/appctl/internal/podman"
 	"github.com/flysangel/appctl/internal/quadlet"
-	"github.com/flysangel/appctl/internal/render"
 	"github.com/flysangel/appctl/internal/repo"
 	"github.com/flysangel/appctl/internal/run"
-	"github.com/flysangel/appctl/internal/setting"
 )
 
 // guarded 的 delete 會刪掉重要資料：ncb 的卷是憑證，kadm 與 xadm-* 部署前要先確認網段隔離。
@@ -78,7 +77,7 @@ func defaultOptions() options {
 			}
 			return envSeconds("SMOKE_TIMEOUT", d)
 		},
-		translate: translate,
+		translate: bundle.Translate,
 	}
 }
 
@@ -88,22 +87,6 @@ func envSeconds(name string, def time.Duration) time.Duration {
 		return def
 	}
 	return time.Duration(n) * time.Second
-}
-
-func translate(root, svc, track string) (*quadlet.Bundle, error) {
-	out, err := render.Render(root, svc, track)
-	if err != nil {
-		return nil, err
-	}
-	docs, err := render.Docs(out)
-	if err != nil {
-		return nil, err
-	}
-	s, err := setting.Load(root, svc, track)
-	if err != nil {
-		return nil, err
-	}
-	return quadlet.Translate(svc, docs, s)
 }
 
 // Run 對每個服務跑煙測。要 root。全部通過回 nil；有服務失敗時，跑完全部才回錯。
@@ -191,6 +174,11 @@ func (s *smoker) one(ctx context.Context, svc, track string) error {
 		}
 	}
 	if err := podman.Delete(ctx, env, b); err != nil {
+		// delete 沒完成（例如沒有 tty）：服務還在跑，停掉它才不會占著 hostPort；卷留著
+		fmt.Fprintf(env.Err, "Error: %s delete 失敗，停掉服務（卷留著）\n", svc)
+		if serr := podman.Stop(ctx, env, svc); serr != nil {
+			fmt.Fprintf(env.Err, "Error: 停止 %s 也失敗：%v\n", svc, serr)
+		}
 		return err
 	}
 	// pod 在 delete 後不該還在
