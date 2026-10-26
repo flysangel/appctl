@@ -1,0 +1,8 @@
+[Unit]
+Description=filebrowser pod
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/podman pod create --replace --name filebrowser -p 4000:4000/tcp
+ExecStop=/usr/bin/podman pod rm -f filebrowser

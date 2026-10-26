@@ -1,0 +1,18 @@
+[Unit]
+Description=filebrowser-filebrowser
+Requires=filebrowser-pod.service
+After=filebrowser-pod.service
+
+[Container]
+ContainerName=filebrowser-filebrowser
+Image=quay.io/flysangel/fbs:base-v1.0.3
+Pull=missing
+PodmanArgs=--pod=filebrowser
+PodmanArgs="--entrypoint=[\"/bin/bash\",\"-c\",\"mkdir -p $$(jq -r .root .filebrowser.json) && exec /sbin/tini -- filebrowser\"]"
+Volume=filebrowser-data.volume:/filebrowser
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
