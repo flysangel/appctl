@@ -53,6 +53,11 @@ tasks:
     cmds:
       - python3 bin/check-secret.py '{{.SVC | default ""}}'
 
+  bootstrap:
+    desc: "[開發] 編譯 appctl 到 bin/appctl（需要 go 在 PATH）"
+    cmds:
+      - go build -o bin/appctl ./cmd/appctl
+
   test:
     desc: "[開發] 單元測試，離線；先跑 go test，再自動收集 tests/test_*.py，每支都要印 ALL <n> PASS"
     cmds:
