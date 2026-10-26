@@ -56,7 +56,7 @@ def config(user="quayuser", db=DB_PW, name="quay", redis1=REDIS_PW, redis2=REDIS
     return CONFIG.format(user=user, db=db, name=name, redis1=redis1, redis2=redis2)
 
 
-def run(secret_env=SECRET_ENV, config_yaml=None, example_env="DB_PASSWORD=changeme\n", example_conf="x: 1\n"):
+def run(secret_env=SECRET_ENV, config_yaml=None):
     if config_yaml is None:
         config_yaml = config()
     with tempfile.TemporaryDirectory() as tmp:
@@ -64,8 +64,6 @@ def run(secret_env=SECRET_ENV, config_yaml=None, example_env="DB_PASSWORD=change
         os.makedirs(os.path.join(d, "secret"))
         os.makedirs(os.path.join(d, "base"))
         open(os.path.join(d, "base", "deployment.yaml"), "w").write(DEPLOYMENT)
-        open(os.path.join(d, "secret", "secret.env.example"), "w").write(example_env)
-        open(os.path.join(d, "secret", "config.yaml.example"), "w").write(example_conf)
         if secret_env is not None:
             open(os.path.join(d, "secret", "secret.env"), "w").write(secret_env)
         if config_yaml is not False:
@@ -98,12 +96,6 @@ def test_db_user_mismatch_fails():
     r = run(config_yaml=config(user="someone"))
     assert r.returncode == 1, r.stdout + r.stderr
     assert "POSTGRES_USER" in r.stderr, r.stderr
-
-
-def test_placeholder_fails():
-    r = run(example_env=SECRET_ENV, example_conf=config())
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "佔位值" in r.stderr, r.stderr
 
 
 def test_missing_file_fails():

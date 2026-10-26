@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_svc.py — bin/svc.sh 自檢：軌守衛、動詞守衛、刪除確認、機密檔 .example fallback 四類，
+# test_svc.py — bin/svc.sh 自檢：軌守衛、動詞守衛、刪除確認、機密檔（demo 值已進版控，不補位）四類，
 # 外加 kustomize 原生渲染的契約（裸 $VAR 存活、Secret 固定名）。
 # 離線靠 run() 把 KUBECONFIG 指向不存在的路徑達成：kubectl kustomize 是純本地操作不受影響，
 # kubectl apply／delete 等需連叢集的操作會連線失敗，不會對真實叢集建立或動到任何資源。
@@ -71,17 +71,17 @@ secretGenerator:
 
 
 def make_svc(tmp, svc="demo", tracks=("k8s",), kustomization=None, pod=None,
-             secret_env=None, secret_env_example=None, config_yaml_example=None):
+             secret_env=None, secret_dir=False):
     """在 tmp 下造出 services/<svc>/ 與 bin/svc.sh 結構，回傳 (root, 服務目錄, 腳本路徑)。
 
-    secret_env／secret_env_example：寫進 services/<svc>/secret/ 的真值檔與範本檔。
-    config_yaml_example：quay 型檔案機密的範本，同樣落在 secret/ 下。
+    secret_env：寫進 services/<svc>/secret/ 的機密檔（demo 值，進版控）。
+    secret_dir：只建 secret/ 與 kustomization，不放 secret.env。
     給任一 secret 參數時會一併產生 secret/kustomization.yaml 並在各軌加 resources: [../secret]。
     """
     root = os.path.join(tmp, "repo")
     d = os.path.join(root, "services", svc)
     os.makedirs(d, exist_ok=True)
-    has_secret = any(x is not None for x in (secret_env, secret_env_example, config_yaml_example))
+    has_secret = any(x is not None for x in (secret_env,)) or secret_dir
     body = kustomization if kustomization is not None else KUSTOMIZATION
     if has_secret:
         body = body.replace("resources:\n", "resources:\n  - ../secret\n")
@@ -96,10 +96,6 @@ def make_svc(tmp, svc="demo", tracks=("k8s",), kustomization=None, pod=None,
         open(os.path.join(sd, "kustomization.yaml"), "w").write(SECRET_KUSTOMIZATION)
         if secret_env is not None:
             open(os.path.join(sd, "secret.env"), "w").write(secret_env)
-        if secret_env_example is not None:
-            open(os.path.join(sd, "secret.env.example"), "w").write(secret_env_example)
-        if config_yaml_example is not None:
-            open(os.path.join(sd, "config.yaml.example"), "w").write(config_yaml_example)
     bindir = os.path.join(root, "bin")
     os.makedirs(bindir, exist_ok=True)
     script = os.path.join(bindir, "svc.sh")
@@ -253,20 +249,8 @@ def test_podman_apply_stream_has_no_pvc_shells():
         assert "kind: PersistentVolumeClaim" not in open(log).read()
 
 
-def test_bad_verb_does_not_create_secret_env():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
-        r = run(script, "demo", "bogus", "k8s")
-        assert r.returncode == 1, r.stdout + r.stderr
-        assert not os.path.exists(os.path.join(d, "secret", "secret.env"))
 
 
-def test_fallback_file_mode_0600():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
-        run(script, "demo", "apply", "k8s")
-        mode = os.stat(os.path.join(d, "secret", "secret.env")).st_mode & 0o777
-        assert mode == 0o600, oct(mode)
 
 
 def test_delete_without_tty_aborts():
@@ -285,56 +269,33 @@ def test_delete_wrong_name_aborts():
         assert "已取消" in r.stdout, r.stdout
 
 
-# ---------- 機密檔 fallback ----------
+# ---------- 機密檔：demo 值進版控，svc.sh 不補位 ----------
 
-def test_secret_env_created_from_example_when_missing():
+def test_tracked_secret_env_apply_prints_no_fallback_info():
     with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
-        real = os.path.join(d, "secret", "secret.env")
-        assert not os.path.exists(real)
+        root, d, script = make_svc(tmp, secret_env="PASS=demo\n")
         r = run(script, "demo", "apply", "k8s")
-        assert os.path.exists(real), r.stdout + r.stderr
-        assert open(real).read() == "PASS=changeme\n"
-        assert "Info:" in r.stdout and "secret.env" in r.stdout
+        assert "缺 secret.env" not in r.stdout, r.stdout
+        assert "佔位值" not in r.stdout, r.stdout
+        assert open(os.path.join(d, "secret", "secret.env")).read() == "PASS=demo\n"
 
 
-def test_existing_secret_env_not_overwritten():
+def test_missing_secret_env_is_not_created():
     with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env="PASS=real\n",
-                                   secret_env_example="PASS=changeme\n")
+        root, d, script = make_svc(tmp, secret_dir=True)
         run(script, "demo", "apply", "k8s")
-        assert open(os.path.join(d, "secret", "secret.env")).read() == "PASS=real\n"
+        assert not os.path.exists(os.path.join(d, "secret", "secret.env"))
 
 
-def test_config_yaml_created_from_example_when_missing():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env="PASS=real\n",
-                                   config_yaml_example="DB_URI: changeme\n")
-        real = os.path.join(d, "secret", "config.yaml")
-        run(script, "demo", "apply", "k8s")
-        assert os.path.exists(real)
-        assert open(real).read() == "DB_URI: changeme\n"
 
 
-def test_apply_warns_when_fallback_used():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
-        r = run(script, "demo", "apply", "k8s")
-        assert "不是真密碼" in r.stdout, r.stdout
 
 
-def test_delete_does_not_warn_on_fallback():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
-        r = run(script, "demo", "delete", "k8s", stdin="wrong\n")
-        assert "不是真密碼" not in r.stdout, r.stdout
 
 
-def test_no_fallback_when_no_example():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp)
-        run(script, "demo", "apply", "k8s")
-        assert not os.path.exists(os.path.join(d, "secret"))
+
+
+
 
 
 # ---------- 渲染契約 ----------
@@ -356,9 +317,9 @@ def test_secret_generator_name_has_no_hash_suffix():
 
 
 def test_missing_secret_env_breaks_render():
-    # 記錄機密檔 fallback 存在的理由：沒有 fallback 時 kustomize 直接 rc≠0。
+    # 缺 secret.env 時 kustomize 直接 rc≠0；svc.sh 不再補位，所以檔要在版控裡。
     with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env_example="PASS=changeme\n")
+        root, d, script = make_svc(tmp, secret_dir=True)
         r = kustomize(os.path.join(d, "k8s"))
         assert r.returncode != 0, "缺 secret.env 時 kustomize 竟然成功了"
 

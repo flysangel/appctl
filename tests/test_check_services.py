@@ -87,7 +87,7 @@ def service(root, name, podman=None, k8s=False, ns="default", secret=False, clus
         write(os.path.join(d, "secret", "kustomization.yaml"),
               "generatorOptions:\n  disableNameSuffixHash: true\nsecretGenerator:\n"
               f"  - name: {name}\n    envs:\n      - secret.env\n")
-        write(os.path.join(d, "secret", "secret.env.example"), "PASS=changeme\n")
+        write(os.path.join(d, "secret", "secret.env"), "PASS=changeme\n")
     for track, port in (podman or {}).items():
         write(os.path.join(d, track, "kustomization.yaml"),
               f"namespace: {ns}\nresources:\n  - ../base\n{extra}" + PODMAN_PATCH.format(name=name, port=port))
@@ -150,10 +150,9 @@ def test_render_failure_reports_and_continues():
     assert "8080" in r.stderr, r.stderr
 
 
-def test_secret_service_renders_with_example_only():
+def test_secret_service_renders_with_tracked_secret():
     r, leaked = run(lambda t: service(t, "a", podman={"podman": 8080}, k8s=True, secret=True))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert not leaked, "假 repo 裡長出了 secret.env"
 
 
 def test_copy_skips_service_root_files():
@@ -167,12 +166,15 @@ def test_copy_skips_service_root_files():
         service(os.path.join(tmp, "src"), "a", podman={"podman": 8080}, secret=True)
         for name in ("mapping.env", "random.csv", "sync.secret.env"):
             write(os.path.join(src, "a", name), "REAL\n")
-        write(os.path.join(src, "a", "secret", "secret.env"), "PASS=REAL\n")
+        write(os.path.join(src, "a", "secret", "secret.env"), "PASS=demo\n")
+        write(os.path.join(src, "a", "secret", "config.yaml"), "k: demo\n")
         dst = os.path.join(tmp, "dst")
         mod.copy_services(src, dst)
         for name in ("mapping.env", "random.csv", "sync.secret.env"):
             assert not os.path.exists(os.path.join(dst, "a", name)), name
-        assert open(os.path.join(dst, "a", "secret", "secret.env")).read() == "PASS=changeme\n"
+        # secret/ 底下的 demo 機密檔整包照帶
+        assert open(os.path.join(dst, "a", "secret", "secret.env")).read() == "PASS=demo\n"
+        assert open(os.path.join(dst, "a", "secret", "config.yaml")).read() == "k: demo\n"
 
 
 if __name__ == "__main__":

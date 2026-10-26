@@ -282,7 +282,7 @@ def main(argv):
         print("Error: usage: sync.py [sync|test]", file=sys.stderr)
         return 1
     for name, hint in (("sync.conf", "這個檔在版控裡，用 git restore 還原"),
-                       ("sync.secret.env", "cp sync.secret.env.example sync.secret.env 後填")):
+                       ("sync.secret.env", "這個檔在版控裡，用 git restore 還原")):
         if not os.path.isfile(os.path.join(HERE, name)):
             print(f"Error: {os.path.join(HERE, name)} 不存在（{hint}）", file=sys.stderr)
             return 1
@@ -294,7 +294,7 @@ def main(argv):
             return 1
     mapping_path = os.path.join(HERE, "mapping.env")
     if not os.path.isfile(mapping_path):
-        print(f"Error: {mapping_path} 不存在（cp mapping.env.example mapping.env 後填）", file=sys.stderr)
+        print(f"Error: {mapping_path} 不存在（這個檔在版控裡，用 git restore 還原）", file=sys.stderr)
         return 1
     try:
         rows = parse_mapping(open(mapping_path).read())

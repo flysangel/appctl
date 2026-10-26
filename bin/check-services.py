@@ -2,7 +2,7 @@
 # check-services.py — 服務層離線驗證：overlay 的 namespace、同主機 hostPort 撞埠、cluster-admin 服務的 LB 來源網段。
 # 用法：check-services.py [repo 路徑]；不給時用本檔所在 repo。pre-push 傳入 git archive 展開的樹。
 # hostPort 寫在 podman overlay 的 JSON6902 patch 裡，要渲染才看得到；展開的樹沒有機密真值檔，
-# 所以把 services/ 複製到暫存目錄，只帶 .example 並改成真名，再跑 kubectl kustomize。真值檔不複製，Secret 不讀。
+# 所以把 services/ 複製到暫存目錄再跑 kubectl kustomize。demo 機密檔已進版控，secret/ 底下整包照帶。
 # 主機鍵：podman 軌是預設主機，podman-<host> 軌是 <host>。互斥清單在 config/port-groups.conf。
 import os
 import shutil
@@ -28,25 +28,17 @@ def load_groups(root):
 
 
 def copy_services(src, dst):
-    """複製 services/，再把 .example 複製成真名。
+    """複製 services/ 給 kustomize 渲染。
 
-    只帶 kustomize 用得到的檔：服務根目錄的檔（sync.secret.env、mapping.env、random.csv 這類真值）一律不帶；
-    secret/ 底下只帶 kustomization.yaml 與 .example。
+    服務根目錄的檔（sync.secret.env、mapping.env、random.csv 這類營運工具用的檔）一律不帶；
+    secret/ 底下的檔是進版控的 demo 值，kustomize 的 secretGenerator 要讀，全部照帶。
     """
     def ignore(dirpath, names):
         parts = os.path.relpath(dirpath, src).split(os.sep)
         if len(parts) == 1 and parts[0] != ".":
             return [n for n in names if os.path.isfile(os.path.join(dirpath, n))]
-        if "secret" not in parts:
-            return []
-        return [n for n in names
-                if os.path.isfile(os.path.join(dirpath, n))
-                and not n.endswith(".example") and n != "kustomization.yaml"]
+        return []
     shutil.copytree(src, dst, ignore=ignore)
-    for dirpath, _, names in os.walk(dst):
-        for n in names:
-            if n.endswith(".example"):
-                shutil.copy(os.path.join(dirpath, n), os.path.join(dirpath, n[:-len(".example")]))
 
 
 def tracks(svc_dir):

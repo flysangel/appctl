@@ -2,7 +2,7 @@
 # check-secret.py — 讀機密真值檔，比對同一個值在不同檔案裡是否一致；只印鍵名與一致與否，不印值。
 # 用法：check-secret.py <svc> [repo 路徑]；目前只有 quay 有規則。
 # quay 的 DB 與 redis 密碼同時寫在 secret.env 與 config.yaml，帳號與庫名同時寫在 deployment.yaml 與 DB_URI。
-# 不一致時渲染與 apply 都成功，quay 起得來卻連不上 DB。真值檔和 .example 相同時是補位的佔位值，比了也沒有意義。
+# 不一致時渲染與 apply 都成功，quay 起得來卻連不上 DB。
 import os
 import sys
 from urllib.parse import urlsplit
@@ -37,9 +37,7 @@ def check_quay(svc_dir):
     errors = []
     for path in (env_path, conf_path):
         if not os.path.isfile(path):
-            errors.append(f"缺 {os.path.relpath(path, svc_dir)}，從主工作樹 cp -p 一份過來")
-        elif os.path.isfile(path + ".example") and open(path, "rb").read() == open(path + ".example", "rb").read():
-            errors.append(f"{os.path.relpath(path, svc_dir)} 和 .example 相同，是補位的佔位值，不是真值")
+            errors.append(f"缺 {os.path.relpath(path, svc_dir)}")
     if errors:
         return [], errors
     env = parse_env(env_path)
