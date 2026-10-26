@@ -22,9 +22,18 @@ type Env struct {
 	Confirm func(in *os.File, out io.Writer, svc, track string) error
 }
 
-// Apply 用 kubectl apply -f - 部署 manifest。
-func Apply(ctx context.Context, r run.Runner, manifest []byte) error {
-	if _, err := r.Run(ctx, "kubectl", []string{"apply", "-f", "-"}, manifest); err != nil {
+// forward 把 kubectl 的 stdout 轉到 out。失敗時 stderr 已在 err 裡，由呼叫端印一次。
+func forward(out io.Writer, b []byte) {
+	if len(b) > 0 {
+		out.Write(b)
+	}
+}
+
+// Apply 用 kubectl apply -f - 部署 manifest，kubectl 的輸出寫到 out。
+func Apply(ctx context.Context, r run.Runner, out io.Writer, manifest []byte) error {
+	b, err := r.Run(ctx, "kubectl", []string{"apply", "-f", "-"}, manifest)
+	forward(out, b)
+	if err != nil {
 		return fmt.Errorf("kubectl apply 失敗：%w", err)
 	}
 	return nil
@@ -45,7 +54,9 @@ func Delete(ctx context.Context, env Env, svc string, manifest []byte) error {
 	if err := ask(env.Stdin, env.Out, svc, track); err != nil {
 		return err
 	}
-	if _, err := env.Runner.Run(ctx, "kubectl", []string{"delete", "-f", "-", "--ignore-not-found"}, manifest); err != nil {
+	b, err := env.Runner.Run(ctx, "kubectl", []string{"delete", "-f", "-", "--ignore-not-found"}, manifest)
+	forward(env.Out, b)
+	if err != nil {
 		return fmt.Errorf("kubectl delete 失敗：%w", err)
 	}
 	out, err := env.Runner.Run(ctx, "kubectl", []string{"get", "pvc", "-n", "default", "-o", "name", "--ignore-not-found"}, nil)

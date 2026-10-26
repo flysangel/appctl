@@ -153,7 +153,7 @@ func runK8s(ctx context.Context, verb, root, svc, track string) error {
 		return err
 	}
 	if verb == "apply" {
-		if err := k8s.Apply(ctx, run.Exec{}, manifest); err != nil {
+		if err := k8s.Apply(ctx, run.Exec{}, os.Stdout, manifest); err != nil {
 			return err
 		}
 		fmt.Printf("Success: 已部署 %s（%s）\n", svc, track)

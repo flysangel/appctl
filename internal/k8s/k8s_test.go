@@ -29,8 +29,13 @@ func noArgHasManifest(t *testing.T, f *run.Fake) {
 
 func TestApplyPipesManifest(t *testing.T) {
 	f := &run.Fake{}
-	if err := Apply(context.Background(), f, []byte(manifest)); err != nil {
+	f.On("kubectl apply", "deployment.apps/x configured\n", 0)
+	var out bytes.Buffer
+	if err := Apply(context.Background(), f, &out, []byte(manifest)); err != nil {
 		t.Fatal(err)
+	}
+	if out.String() != "deployment.apps/x configured\n" {
+		t.Errorf("kubectl 輸出應寫到 Out：%q", out.String())
 	}
 	if len(f.Calls) != 1 || f.Calls[0].Line() != "kubectl apply -f -" {
 		t.Fatalf("應只跑 kubectl apply -f -：%v", f.Lines())
@@ -44,23 +49,33 @@ func TestApplyPipesManifest(t *testing.T) {
 func TestApplyReturnsKubectlError(t *testing.T) {
 	f := &run.Fake{}
 	f.On("kubectl apply", "", 1)
-	if err := Apply(context.Background(), f, []byte(manifest)); err == nil {
+	if err := Apply(context.Background(), f, io.Discard, []byte(manifest)); err == nil {
 		t.Fatal("kubectl 失敗時應回錯")
 	}
 }
 
 func TestDeleteListsStatefulSetPVCs(t *testing.T) {
 	f := &run.Fake{}
+	f.On("kubectl delete", "deployment.apps \"minio\" deleted\n", 0)
 	f.On("kubectl get pvc", "persistentvolumeclaim/minio-data0-minio-0\npersistentvolumeclaim/other-data\n", 0)
 	var out bytes.Buffer
 	env := Env{Runner: f, Out: &out, Confirm: yes}
 	if err := Delete(context.Background(), env, "minio", []byte(manifest)); err != nil {
 		t.Fatal(err)
 	}
-	if !f.Called("kubectl delete -f - --ignore-not-found") {
-		t.Errorf("應跑 kubectl delete：%v", f.Lines())
+	if len(f.Calls) != 2 || f.Calls[0].Line() != "kubectl delete -f - --ignore-not-found" {
+		t.Fatalf("應先跑 kubectl delete：%v", f.Lines())
+	}
+	if string(f.Calls[0].Stdin) != manifest {
+		t.Errorf("kubectl delete 的 stdin 應等於 manifest：%q", f.Calls[0].Stdin)
+	}
+	if f.Calls[1].Line() != "kubectl get pvc -n default -o name --ignore-not-found" {
+		t.Errorf("列 PVC 的指令不對：%s", f.Calls[1].Line())
 	}
 	s := out.String()
+	if !strings.Contains(s, `deployment.apps "minio" deleted`) {
+		t.Errorf("kubectl delete 的輸出應寫到 Out：%q", s)
+	}
 	if !strings.Contains(s, "persistentvolumeclaim/minio-data0-minio-0") || !strings.Contains(s, "kubectl delete") {
 		t.Errorf("應列出 PVC 與手動清除指令：%q", s)
 	}
@@ -111,6 +126,9 @@ func TestDeleteFailureSkipsPVCList(t *testing.T) {
 	err := Delete(context.Background(), Env{Runner: f, Out: io.Discard, Confirm: yes}, "minio", []byte(manifest))
 	if err == nil {
 		t.Fatal("kubectl delete 失敗應回錯")
+	}
+	if f.Called("kubectl get pvc") {
+		t.Errorf("delete 失敗時不該列 PVC：%v", f.Lines())
 	}
 }
 
