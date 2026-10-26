@@ -1,9 +1,17 @@
-# 機密：根目錄的 .env 與金鑰檔不追蹤。
-# 各服務 secret/ 與 gmm 的 mapping.env、sync.secret.env 是進版控的 demo 值，真值只在部署主機上。
-/.env
+# 機密：*.env 與金鑰檔一律不追蹤，只放行下面列出的 demo 值檔（進版控，真值只在部署主機上）。
+.env
+*.env
+!.env.example
+!*.env.example
 *.key
 *.pem
 id_rsa*
+**/secrets/
+
+# demo 機密檔：明確放行，其餘 *.env 照擋
+!services/*/secret/secret.env
+!services/gmm/mapping.env
+!services/gmm/sync.secret.env
 
 # build / render 產出
 build/

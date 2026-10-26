@@ -34,6 +34,7 @@ forbid_pats="${top}/.githooks/forbidden-patterns.txt"
 check_docs="${top}/bin/check-docs.py"
 check_taskfile="${top}/bin/check-taskfile.py"
 # 本 repo 自己的快速檢查，由 scan_repo_checks 逐支跑（主工作樹 bin/ 底下的檔名）。
+# check-examples.py 不放：它靠 git check-ignore，展開的樹沒有 .git，只在 task lint 跑。
 REPO_CHECKS=(check-manifests.py check-services.py)
 
 GITLEAKS_MIN='8.19.0'
