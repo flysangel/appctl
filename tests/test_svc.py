@@ -11,7 +11,6 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SVC_SH = os.path.join(ROOT, "bin", "svc.sh")
-ASSERT_IMAGES = os.path.join(ROOT, "bin", "assert-images.sh")
 PVC_SHELLS = os.path.join(ROOT, "bin", "pvc-shells.py")
 
 # Deployment 型 fixture，掛一個具名卷：podman 4.9.3 的 kube down --force 不收它的 claimName
@@ -57,7 +56,7 @@ spec:
     args: ["--user \\"$BARE_VAR\\""]
 """
 
-# podman 軌名：通用的 podman 與依主機分出的 podman-4060ti。svc.sh 與 assert-images.sh 都要認得 podman 開頭的軌
+# podman 軌名：通用的 podman 與依主機分出的 podman-4060ti。svc.sh 要認得 podman 開頭的軌
 PODMAN_TRACKS = ("podman", "podman-4060ti")
 
 SECRET_KUSTOMIZATION = """\
@@ -103,7 +102,6 @@ def make_svc(tmp, svc="demo", tracks=("k8s",), kustomization=None, pod=None,
     os.makedirs(bindir, exist_ok=True)
     script = os.path.join(bindir, "svc.sh")
     shutil.copy(SVC_SH, script)
-    shutil.copy(ASSERT_IMAGES, os.path.join(bindir, "assert-images.sh"))
     shutil.copy(PVC_SHELLS, os.path.join(bindir, "pvc-shells.py"))
     return root, d, script
 
@@ -312,51 +310,6 @@ def test_missing_secret_env_breaks_render():
         root, d, script = make_svc(tmp, secret_dir=True)
         r = kustomize(os.path.join(d, "k8s"))
         assert r.returncode != 0, "缺 secret.env 時 kustomize 竟然成功了"
-
-
-# ---------- assert-images.sh 守衛 ----------
-
-def _run_assert(root, svc):
-    return subprocess.run(
-        ["bash", os.path.join(root, "bin", "assert-images.sh"), svc],
-        capture_output=True, text=True
-    )
-
-
-def test_assert_images_rejects_short_name():
-    bad = POD.replace("example.io/demo:v1", "demo")
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, pod=bad)
-        r = _run_assert(root, "demo")
-        assert r.returncode == 1, r.stdout + r.stderr
-        assert "不是完整參照" in r.stderr, r.stderr
-
-
-def test_assert_images_renders_podman_prefixed_tracks():
-    # 服務只有 podman 或 podman-4060ti 軌時也要渲染到。沒渲染到會落到「零個 image」。
-    # 這裡用短名，讓渲染產物帶出不完整的 image。看錯誤訊息就分得出有沒有渲染到。
-    bad = POD.replace("example.io/demo:v1", "demo")
-    for track in PODMAN_TRACKS:
-        with tempfile.TemporaryDirectory() as tmp:
-            root, d, script = make_svc(tmp, tracks=(track,), pod=bad)
-            r = _run_assert(root, "demo")
-            assert r.returncode == 1, track + r.stdout + r.stderr
-            assert "不是完整參照" in r.stderr, track + r.stderr
-
-
-def test_assert_images_rejects_zero_images():
-    empty = "namespace: default\nresources: []\n"
-    with tempfile.TemporaryDirectory() as tmp:
-        root = os.path.join(tmp, "repo")
-        td = os.path.join(root, "services", "demo", "k8s")
-        os.makedirs(td)
-        open(os.path.join(td, "kustomization.yaml"), "w").write(empty)
-        bindir = os.path.join(root, "bin")
-        os.makedirs(bindir)
-        shutil.copy(ASSERT_IMAGES, os.path.join(bindir, "assert-images.sh"))
-        r = _run_assert(root, "demo")
-        assert r.returncode == 1, r.stdout + r.stderr
-        assert "零個 image" in r.stderr, r.stderr
 
 
 # 沒有這段，Taskfile 的 `python3 tests/test_svc.py` 會零輸出、rc=0——一支測試都沒跑卻報成功。

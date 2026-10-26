@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/flysangel/appctl/internal/check"
 	"github.com/flysangel/appctl/internal/k8s"
 	"github.com/flysangel/appctl/internal/podman"
 	"github.com/flysangel/appctl/internal/quadlet"
@@ -29,6 +30,12 @@ func main() {
 		err = runRender(os.Args[2:])
 	case "apply", "stop", "delete":
 		err = runVerb(verb, os.Args[2:])
+	case "check":
+		err = runCheck(os.Args[2:])
+	case "check-images":
+		err = runCheckImages(os.Args[2:])
+	case "check-secret":
+		err = runCheckSecret(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -44,7 +51,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>")
+	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>")
 }
 
 // parseSvcTrack 解析 <svc> --track <軌>，<svc> 在 flag 前後都可以。
@@ -181,4 +188,104 @@ func translate(root, svc, track string) (*quadlet.Bundle, error) {
 		return nil, err
 	}
 	return quadlet.Translate(svc, docs, s)
+}
+
+// runCheck 跑離線靜態檢查：manifest 的 image 與服務層規則。
+func runCheck(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("用法：appctl check")
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	var problems []string
+	if errs := check.Manifests(root); len(errs) > 0 {
+		fmt.Fprintln(os.Stderr, "Error: manifest 的 image 檢查未通過：")
+		printIndented(errs)
+		problems = append(problems, errs...)
+	}
+	errs, infos := check.Services(root)
+	for _, i := range infos {
+		fmt.Println("Info:", i)
+	}
+	if len(errs) > 0 {
+		fmt.Fprintln(os.Stderr, "Error: 服務層檢查未通過：")
+		printIndented(errs)
+		problems = append(problems, errs...)
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("靜態檢查未通過，共 %d 項", len(problems))
+	}
+	fmt.Println("Success: services/ 的 image 與服務層檢查都通過")
+	return nil
+}
+
+func printIndented(lines []string) {
+	for _, l := range lines {
+		fmt.Fprintln(os.Stderr, "  "+l)
+	}
+}
+
+func singleSvc(verb string, args []string) (string, error) {
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		return "", fmt.Errorf("用法：appctl %s <svc>", verb)
+	}
+	return args[0], nil
+}
+
+// runCheckImages 渲染服務的每一軌，確認每個 image 都還在來源 registry（需要網路與 skopeo）。
+func runCheckImages(args []string) error {
+	svc, err := singleSvc("check-images", args)
+	if err != nil {
+		return err
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	tracks, err := repo.Tracks(root, svc)
+	if err != nil {
+		return err
+	}
+	var docs []map[string]any
+	for _, track := range tracks {
+		out, err := render.Render(root, svc, track)
+		if err != nil {
+			return err
+		}
+		d, err := render.Docs(out)
+		if err != nil {
+			return err
+		}
+		docs = append(docs, d...)
+	}
+	errs := check.ImagesExist(context.Background(), run.Exec{}, docs)
+	if len(errs) > 0 {
+		fmt.Fprintf(os.Stderr, "Error: %s 的 image 檢查未通過：\n", svc)
+		printIndented(errs)
+		return fmt.Errorf("%s 有 %d 個 image 有問題", svc, len(errs))
+	}
+	fmt.Printf("Success: %s 所有 image 皆為完整參照且存在於來源 registry\n", svc)
+	return nil
+}
+
+// runCheckSecret 比對機密真值在各檔之間是否一致，只印鍵名。
+func runCheckSecret(args []string) error {
+	svc, err := singleSvc("check-secret", args)
+	if err != nil {
+		return err
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	if errs := check.Secret(root, svc); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintln(os.Stderr, "Error: "+e)
+		}
+		return fmt.Errorf("%s 的機密檢查未通過", svc)
+	}
+	fmt.Printf("Success: %s 的機密在各檔之間一致\n", svc)
+	return nil
 }

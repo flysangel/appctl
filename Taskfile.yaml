@@ -25,13 +25,12 @@ tasks:
       - bash bin/doctor.sh
 
   lint:
-    desc: "[開發] 離線靜態檢查：四大文件、Taskfile、manifest 的 image、服務層規則、shellcheck"
+    desc: "[開發] 離線靜態檢查：四大文件、Taskfile、appctl check（image、服務層規則）、shellcheck"
     cmds:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
-      - python3 bin/check-manifests.py
-      - python3 bin/check-services.py
-      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh bin/smoke.sh bin/render-diff.sh services/gmm/sync.sh
+      - go run ./cmd/appctl check
+      - shellcheck -S error -x bin/svc.sh bin/doctor.sh bin/smoke.sh bin/render-diff.sh services/gmm/sync.sh
       - shellcheck -S warning .githooks/pre-push
 
   smoke:
@@ -46,13 +45,6 @@ tasks:
     cmds:
       - bash bin/smoke.sh {{.CLI_ARGS}}
 
-  lint:secret:
-    desc: "[開發] 比對機密真值在各檔之間一致，只印鍵名不印值（用法：task lint:secret SVC=quay）"
-    preconditions:
-      - { sh: "[[ -n '{{.SVC | default \"\"}}' ]]", msg: "用法：task lint:secret SVC=quay（未提供 SVC）" }
-    cmds:
-      - python3 bin/check-secret.py '{{.SVC | default ""}}'
-
   bootstrap:
     desc: "[開發] 編譯 appctl 到 bin/appctl（需要 go 在 PATH）"
     cmds:
@@ -63,14 +55,6 @@ tasks:
     cmds:
       - go test ./...
       - python3 bin/run-tests.py
-
-  check:image:
-    desc: "[開發] 確認渲染後每個 image 都是完整參照，且仍存在於來源 registry（skopeo inspect；用法：task check:image SVC=grafana）"
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: "用法：task check:image SVC=grafana（未提供 SVC）"
-    cmds:
-      - bash bin/assert-images.sh '{{.SVC}}'
 
   apply:
     desc: "[維運] 部署服務（用法：task apply SVC=grafana TRACK=podman）"
