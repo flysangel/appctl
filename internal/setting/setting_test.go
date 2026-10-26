@@ -124,3 +124,21 @@ func TestValidateMissingPorts(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestHostPort(t *testing.T) {
+	s, err := parse(t, "[ports]\nweb = 18080:8080\nweb = 53:53/udp\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.HostPort("web", 8080); err != nil || got != 18080 {
+		t.Fatalf("got %d, %v", got, err)
+	}
+	for _, c := range []struct {
+		name string
+		port int
+	}{{"web", 53}, {"web", 9999}, {"nope", 8080}} {
+		if _, err := s.HostPort(c.name, c.port); err == nil || !strings.Contains(err.Error(), c.name) {
+			t.Errorf("%s:%d 應回錯並帶容器名：%v", c.name, c.port, err)
+		}
+	}
+}

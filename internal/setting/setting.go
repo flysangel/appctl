@@ -102,6 +102,16 @@ func Load(root, svc, track string) (*Setting, error) {
 	return s, nil
 }
 
+// HostPort 回傳容器 container 的 TCP 容器埠 cport 對應的主機埠。查不到時回錯，訊息帶容器名與埠。
+func (s *Setting) HostPort(container string, cport int) (int, error) {
+	for _, p := range s.Ports {
+		if p.ContainerName == container && p.ContainerPort == cport && p.Protocol == "TCP" {
+			return p.HostPort, nil
+		}
+	}
+	return 0, fmt.Errorf("setting.conf 的 [ports] 沒有容器 %s 的 %d/TCP 對應", container, cport)
+}
+
 // Validate 對照渲染後的文件，檢查 setting 的容器名與容器埠都存在。
 func Validate(s *Setting, docs []map[string]any) error {
 	if len(s.Ports) == 0 {

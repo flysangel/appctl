@@ -23,30 +23,32 @@ import (
 	"github.com/flysangel/appctl/internal/quadlet"
 	"github.com/flysangel/appctl/internal/repo"
 	"github.com/flysangel/appctl/internal/run"
+	"github.com/flysangel/appctl/internal/setting"
 )
 
 // guarded 的 delete 會刪掉重要資料：ncb 的卷是憑證，kadm 與 xadm-* 部署前要先確認網段隔離。
 var guarded = []string{"ncb", "kadm", "xadm-lxqt", "xadm-xfce"}
 
-// probeSpec 是一個服務的 HTTP 探測。
+// probeSpec 是一個服務的 HTTP 探測。主機埠不寫死：用 container 與 cport 到 setting.conf 查。
 type probeSpec struct {
-	port int
-	path string
+	container string
+	cport     int
+	path      string
 	// ok 判斷一次回應算不算通過。body 只有 wantBody 為 true 時才讀。
 	ok       func(code int, body []byte) bool
 	wantBody bool
 }
 
 var probes = map[string]probeSpec{
-	"gmm": {port: 8080, path: "/guacamole/", ok: func(c int, _ []byte) bool { return c >= 200 && c < 400 }},
-	"grafana": {port: 3000, path: "/api/health", wantBody: true, ok: func(_ int, b []byte) bool {
+	"gmm": {container: "guacamole", cport: 8080, path: "/guacamole/", ok: func(c int, _ []byte) bool { return c >= 200 && c < 400 }},
+	"grafana": {container: "grafana", cport: 3000, path: "/api/health", wantBody: true, ok: func(_ int, b []byte) bool {
 		var h struct {
 			Database string `json:"database"`
 		}
 		return json.Unmarshal(b, &h) == nil && h.Database == "ok"
 	}},
-	"quay": {port: 8080, path: "/health/instance", ok: func(c int, _ []byte) bool { return c == 200 }},
-	"ncb":  {port: 80, path: "/", ok: func(c int, _ []byte) bool { return c == 301 }},
+	"quay": {container: "quay-app", cport: 8080, path: "/health/instance", ok: func(c int, _ []byte) bool { return c == 200 }},
+	"ncb":  {container: "nginx", cport: 80, path: "/", ok: func(c int, _ []byte) bool { return c == 301 }},
 }
 
 // options 是可以在測試換掉的部分。
@@ -162,7 +164,7 @@ func (s *smoker) one(ctx context.Context, svc, track string) error {
 		fmt.Fprintf(env.Out, "Info: %s 第 %d 次 apply\n", svc, round)
 		err := podman.Apply(ctx, env, b)
 		if err == nil {
-			err = s.check(ctx, svc, b, timeout)
+			err = s.check(ctx, svc, track, b, timeout)
 		}
 		if err != nil {
 			// 清掉服務，免得占著 hostPort 讓下一個服務連鎖失敗；卷留著
@@ -193,14 +195,27 @@ func (s *smoker) one(ctx context.Context, svc, track string) error {
 	return nil
 }
 
-func (s *smoker) check(ctx context.Context, svc string, b *quadlet.Bundle, timeout time.Duration) error {
+func (s *smoker) check(ctx context.Context, svc, track string, b *quadlet.Bundle, timeout time.Duration) error {
 	if err := s.waitActive(ctx, svc, b, timeout); err != nil {
 		return err
 	}
-	if err := s.probe(ctx, svc, timeout); err != nil {
+	if err := s.probe(ctx, svc, track, timeout); err != nil {
 		return err
 	}
-	return s.login(ctx, svc)
+	return s.login(ctx, svc, track)
+}
+
+// hostPort 從 services/<svc>/<track>/setting.conf 查容器埠發佈到哪個主機埠。
+func (s *smoker) hostPort(svc, track, container string, cport int) (int, error) {
+	st, err := setting.Load(s.root, svc, track)
+	if err != nil {
+		return 0, err
+	}
+	port, err := st.HostPort(container, cport)
+	if err != nil {
+		return 0, fmt.Errorf("%s/%s：%w", svc, track, err)
+	}
+	return port, nil
 }
 
 // activeUnits 回傳 Bundle 的 pod 服務與每個容器單元對應的 systemd 服務名。.volume 不算：它是一次性的。
@@ -258,8 +273,8 @@ func sleep(ctx context.Context, d time.Duration) error {
 }
 
 // probeOnce 探一次。連不上或不符合都回 false。
-func (s *smoker) probeOnce(ctx context.Context, p probeSpec) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.opt.url(p.port, p.path), nil)
+func (s *smoker) probeOnce(ctx context.Context, p probeSpec, port int) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.opt.url(port, p.path), nil)
 	if err != nil {
 		return false
 	}
@@ -276,16 +291,20 @@ func (s *smoker) probeOnce(ctx context.Context, p probeSpec) bool {
 }
 
 // probe 重試到通過或逾時：單元剛 active 時服務多半還沒聽埠。
-func (s *smoker) probe(ctx context.Context, svc string, timeout time.Duration) error {
+func (s *smoker) probe(ctx context.Context, svc, track string, timeout time.Duration) error {
 	p, has := probes[svc]
 	if !has {
 		fmt.Fprintf(s.env.Out, "Info: %s 沒有 HTTP 探測，只確認單元都是 active\n", svc)
 		return nil
 	}
+	port, err := s.hostPort(svc, track, p.container, p.cport)
+	if err != nil {
+		return err
+	}
 	deadline := time.Now().Add(timeout)
-	for !s.probeOnce(ctx, p) {
+	for !s.probeOnce(ctx, p, port) {
 		if !time.Now().Before(deadline) {
-			return fmt.Errorf("%s 的 HTTP 探測等了 %s 還沒通過（GET :%d%s）", svc, timeout, p.port, p.path)
+			return fmt.Errorf("%s 的 HTTP 探測等了 %s 還沒通過（GET :%d%s）", svc, timeout, port, p.path)
 		}
 		if err := sleep(ctx, s.opt.interval); err != nil {
 			return err
@@ -298,7 +317,7 @@ func (s *smoker) probe(ctx context.Context, svc string, timeout time.Duration) e
 var adminLine = regexp.MustCompile(`^GUACAMOLE_ADMIN=(\S*)`)
 
 // login 只有 gmm 要：用 sync.conf 的管理帳號與 sync.secret.env 的密碼取 authToken。密碼只放在 POST body。
-func (s *smoker) login(ctx context.Context, svc string) error {
+func (s *smoker) login(ctx context.Context, svc, track string) error {
 	if svc != "gmm" {
 		return nil
 	}
@@ -327,8 +346,13 @@ func (s *smoker) login(ctx context.Context, svc string) error {
 			pass = v
 		}
 	}
+	p := probes["gmm"]
+	port, err := s.hostPort(svc, track, p.container, p.cport)
+	if err != nil {
+		return err
+	}
 	form := url.Values{"username": {admin}, "password": {pass}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.opt.url(8080, "/guacamole/api/tokens"), strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.opt.url(port, "/guacamole/api/tokens"), strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}

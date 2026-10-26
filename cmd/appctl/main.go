@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/flysangel/appctl/internal/bundle"
@@ -20,6 +21,7 @@ import (
 	"github.com/flysangel/appctl/internal/render"
 	"github.com/flysangel/appctl/internal/repo"
 	"github.com/flysangel/appctl/internal/run"
+	"github.com/flysangel/appctl/internal/setting"
 	"github.com/flysangel/appctl/internal/smoke"
 )
 
@@ -360,7 +362,7 @@ func runGmm(args []string) error {
 }
 
 // runQuay 處理 quay init。k8s 軌先 port-forward svc/quay，用完就停；
-// podman 軌連 setting.conf 發佈的主機埠 8080。一般使用者身分就能跑。
+// podman 軌連 setting.conf 裡 quay-app 容器埠 8080 對應的主機埠。一般使用者身分就能跑。
 func runQuay(args []string) error {
 	const use = "用法：appctl quay init --track <軌>"
 	if len(args) == 0 || args[0] != "init" {
@@ -398,11 +400,26 @@ func runQuay(args []string) error {
 		opts.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
 		fmt.Printf("Info: 已用 kubectl port-forward 連到 svc/quay，本機埠 %d\n", port)
 	case strings.HasPrefix(track, "podman"):
-		opts.BaseURL = "http://127.0.0.1:8080"
+		if opts.BaseURL, err = quayPodmanURL(root, track); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("%s 軌的 quay init 還沒實作", track)
 	}
 	return quay.Init(ctx, opts)
+}
+
+// quayPodmanURL 從 podman 軌的 setting.conf 查 quay-app 容器埠 8080 發佈到哪個主機埠。
+func quayPodmanURL(root, track string) (string, error) {
+	s, err := setting.Load(root, "quay", track)
+	if err != nil {
+		return "", err
+	}
+	port, err := s.HostPort("quay-app", 8080)
+	if err != nil {
+		return "", fmt.Errorf("quay：%w", err)
+	}
+	return "http://127.0.0.1:" + strconv.Itoa(port), nil
 }
 
 // runNcb 處理 ncb cert。只支援 podman 軌（卷與容器名來自 Quadlet），要 root。

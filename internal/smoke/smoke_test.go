@@ -17,6 +17,7 @@ import (
 	"github.com/flysangel/appctl/internal/podman"
 	"github.com/flysangel/appctl/internal/quadlet"
 	"github.com/flysangel/appctl/internal/render"
+	"github.com/flysangel/appctl/internal/repo"
 	"github.com/flysangel/appctl/internal/run"
 	"github.com/flysangel/appctl/internal/setting"
 )
@@ -108,9 +109,31 @@ func newHarness(t *testing.T, noPodman ...string) *harness {
 	return h
 }
 
+// addService 建服務的軌目錄。repo 裡同名服務同軌有 setting.conf 時，一起複製過來：
+// 探測與登入的主機埠從 setting.conf 查，測試斷言的埠就是 repo 現行的值。
 func (h *harness) addService(t *testing.T, svc, track string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(h.root, "services", svc, track), 0o755); err != nil {
+	dir := filepath.Join(h.root, "services", svc, track)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repoRoot, err := repo.Root(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(repoRoot, "services", svc, track, "setting.conf"))
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.writeSetting(t, svc, track, string(b))
+}
+
+func (h *harness) writeSetting(t *testing.T, svc, track, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(h.root, "services", svc, track, "setting.conf"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -525,5 +548,39 @@ func TestDefaultOptionsEnv(t *testing.T) {
 	o = defaultOptions()
 	if o.timeout("a") != 120*time.Second || o.timeout("quay") != 600*time.Second || o.interval != 5*time.Second {
 		t.Errorf("預設值不對：%v %v %v", o.timeout("a"), o.timeout("quay"), o.interval)
+	}
+}
+
+func TestProbeUsesSettingHostPort(t *testing.T) {
+	h := newHarness(t)
+	h.addService(t, "grafana", "podman")
+	h.writeSetting(t, "grafana", "podman", "[ports]\ngrafana = 13000:3000\n")
+	h.handler = func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"database":"ok"}`)) }
+	if err := h.run([]string{"grafana"}, false); err != nil {
+		t.Fatalf("%v\n%s", err, h.out)
+	}
+	if len(h.ports) == 0 {
+		t.Fatal("沒有記到任何埠")
+	}
+	for _, p := range h.ports {
+		if p != 13000 {
+			t.Errorf("探測埠 = %d，應從 setting.conf 查到 13000", p)
+		}
+	}
+}
+
+func TestProbeMissingPortMappingFails(t *testing.T) {
+	h := newHarness(t)
+	h.addService(t, "quay", "podman")
+	h.writeSetting(t, "quay", "podman", "[ports]\nother = 18080:80\n")
+	err := h.run([]string{"quay"}, false)
+	if err == nil {
+		t.Fatal("setting.conf 缺 quay-app:8080 應失敗")
+	}
+	if !strings.Contains(h.out.String(), "quay-app") {
+		t.Errorf("錯誤訊息應指出缺哪個容器：%s", h.out)
+	}
+	if h.hits.Load() != 0 {
+		t.Errorf("查不到埠時不應打 HTTP：%d", h.hits.Load())
 	}
 }
