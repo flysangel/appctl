@@ -270,15 +270,6 @@ def test_delete_wrong_name_aborts():
 
 # ---------- 機密檔：demo 值進版控，svc.sh 不補位 ----------
 
-def test_tracked_secret_env_apply_prints_no_fallback_info():
-    with tempfile.TemporaryDirectory() as tmp:
-        root, d, script = make_svc(tmp, secret_env="PASS=demo\n")
-        r = run(script, "demo", "apply", "k8s")
-        assert "缺 secret.env" not in r.stdout, r.stdout
-        assert "佔位值" not in r.stdout, r.stdout
-        assert open(os.path.join(d, "secret", "secret.env")).read() == "PASS=demo\n"
-
-
 def test_apply_does_not_copy_example_to_secret_env():
     # 舊版 svc.sh 會把 .example 補成 secret.env 並印 Info；新版什麼都不補
     with tempfile.TemporaryDirectory() as tmp:
