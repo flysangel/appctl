@@ -109,12 +109,12 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 
 ### 真環境煙測會刪資料，先問使用者
 
-podman 軌的煙測是 `task smoke -- <svc>...`，步驟與各服務的探測寫在 `bin/smoke.sh`。宣稱完成前，要真的跑過並貼出輸出。
+podman 軌的煙測是 `sudo bin/appctl smoke <svc>...`，步驟與各服務的探測寫在 `internal/smoke/smoke.go`。宣稱完成前，要真的跑過並貼出輸出。
 
 - 最後一步是 `delete`，會刪掉該服務的卷，正式資料一起消失。跑之前先問使用者要跑哪些服務。
 - ncb、kadm、xadm-* 預設拒跑，理由見〈會刪資料的動作，先問使用者〉；要跑得加 `--allow-guarded`。
 - 每個服務的 `delete` 會要求輸入服務名，所以要有 tty，沒有 tty 時那個服務記為失敗。
-- k8s 軌沒有煙測腳本，照 `bin/smoke.sh` 的步驟手動跑。
+- k8s 軌沒有煙測腳本，照 `internal/smoke/smoke.go` 的步驟手動跑。
 
 ## 5. 不要做的事
 

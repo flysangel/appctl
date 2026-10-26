@@ -30,20 +30,8 @@ tasks:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
       - go run ./cmd/appctl check
-      - shellcheck -S error -x bin/svc.sh bin/doctor.sh bin/smoke.sh bin/render-diff.sh services/gmm/sync.sh
+      - shellcheck -S error -x bin/svc.sh bin/doctor.sh bin/render-diff.sh services/gmm/sync.sh
       - shellcheck -S warning .githooks/pre-push
-
-  smoke:
-    # 確認由腳本負責：bin/svc.sh
-    desc: "[開發]【破壞性】podman 軌煙測：apply、探測、再 apply、delete，delete 會刪卷（用法：task smoke -- gmm grafana）"
-    summary: |
-      轉派至 bin/smoke.sh。每個服務的 delete 都經 bin/svc.sh，會要求輸入服務名確認。
-      ncb、kadm、xadm-* 預設拒跑，要加 --allow-guarded。沒有 podman 軌的服務直接跳過。
-      一個服務失敗記錄後繼續跑下一個，全部跑完才決定結束碼。
-    preconditions:
-      - { sh: "[[ -n '{{.CLI_ARGS | default \"\"}}' ]]", msg: "用法：task smoke -- gmm grafana（未提供服務名）" }
-    cmds:
-      - bash bin/smoke.sh {{.CLI_ARGS}}
 
   bootstrap:
     desc: "[開發] 編譯 appctl 到 bin/appctl（需要 go 在 PATH）"

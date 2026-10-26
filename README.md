@@ -45,7 +45,6 @@
 | `python3` 與 PyYAML | 單元測試、`manifest-diff`、`task lint` 的四大文件與 Taskfile 檢查 | 必要 |
 | `skopeo` | `task check:image` 查映像是否還在來源 registry | 用到時 |
 | `nmap` | gmm 的 `task seed` | 用到時 |
-| `curl` | `task smoke` 的 HTTP 探測 | 用到時 |
 | `shellcheck` | `task lint` 的靜態檢查 | 必要 |
 | `gitleaks` | push 護欄的機密掃描 | 必要 |
 

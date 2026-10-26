@@ -29,7 +29,6 @@ bin/
   run-tests.py             task test 的執行器：收集 tests/test_*.py，每支都要印 ALL <n> PASS
   manifest-diff.py         語意零漂移比對器（大改時用，不在日常流程）
   render-diff.sh           比對某個 revision 與工作樹的渲染產物，只用 .example 補位，底層是 manifest-diff.py
-  smoke.sh                 podman 軌煙測：apply、探測、再 apply、delete
   pvc-shells.py            podman delete 前替 Deployment 與 DaemonSet 的卷補 PVC 殼
   check-secret.py          比對機密真值在各檔之間一致，只印鍵名
 

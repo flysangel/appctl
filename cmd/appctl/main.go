@@ -17,6 +17,7 @@ import (
 	"github.com/flysangel/appctl/internal/repo"
 	"github.com/flysangel/appctl/internal/run"
 	"github.com/flysangel/appctl/internal/setting"
+	"github.com/flysangel/appctl/internal/smoke"
 )
 
 func main() {
@@ -30,6 +31,8 @@ func main() {
 		err = runRender(os.Args[2:])
 	case "apply", "stop", "delete":
 		err = runVerb(verb, os.Args[2:])
+	case "smoke":
+		err = runSmoke(os.Args[2:])
 	case "check":
 		err = runCheck(os.Args[2:])
 	case "check-images":
@@ -51,7 +54,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>")
+	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>")
 }
 
 // parseSvcTrack 解析 <svc> --track <軌>，<svc> 在 flag 前後都可以。
@@ -148,6 +151,20 @@ func runVerb(verb string, args []string) error {
 	}
 	fmt.Printf("Success: 已刪除 %s（%s），含資料卷\n", svc, track)
 	return nil
+}
+
+// runSmoke 跑 podman 軌煙測。最後的 delete 會刪卷，要 root 與 tty。
+func runSmoke(args []string) error {
+	fs := flag.NewFlagSet("smoke", flag.ContinueOnError)
+	allow := fs.Bool("allow-guarded", false, "連 ncb、kadm、xadm-* 也跑（delete 會刪它們的卷）")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	return smoke.Run(context.Background(), podman.DefaultEnv(root, "podman"), root, fs.Args(), *allow)
 }
 
 // runK8s 處理 k8s 軌：渲染後經 stdin 交給 kubectl，不要求 root。
