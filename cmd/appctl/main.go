@@ -14,6 +14,7 @@ import (
 	"github.com/flysangel/appctl/internal/check"
 	"github.com/flysangel/appctl/internal/gmm"
 	"github.com/flysangel/appctl/internal/k8s"
+	"github.com/flysangel/appctl/internal/ncb"
 	"github.com/flysangel/appctl/internal/podman"
 	"github.com/flysangel/appctl/internal/quay"
 	"github.com/flysangel/appctl/internal/render"
@@ -45,6 +46,8 @@ func main() {
 		err = runGmm(os.Args[2:])
 	case "quay":
 		err = runQuay(os.Args[2:])
+	case "ncb":
+		err = runNcb(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -60,7 +63,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>\n      appctl gmm seed|check --track <軌>\n      appctl quay init --track <軌>")
+	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>\n      appctl gmm seed|check --track <軌>\n      appctl quay init --track <軌>\n      sudo appctl ncb cert [--force] | [--acme --email <信箱> [--no-staging]]")
 }
 
 // parseSvcTrack 解析 <svc> --track <軌>，<svc> 在 flag 前後都可以。
@@ -395,4 +398,29 @@ func runQuay(args []string) error {
 		return fmt.Errorf("%s 軌的 quay init 還沒實作", track)
 	}
 	return quay.Init(ctx, opts)
+}
+
+// runNcb 處理 ncb cert。只支援 podman 軌（卷與容器名來自 Quadlet），要 root。
+func runNcb(args []string) error {
+	const use = "用法：sudo appctl ncb cert [--force] | [--acme --email <信箱> [--no-staging]]"
+	if len(args) == 0 || args[0] != "cert" {
+		return errors.New(use)
+	}
+	fs := flag.NewFlagSet("ncb cert", flag.ContinueOnError)
+	acme := fs.Bool("acme", false, "向 Let's Encrypt 申請憑證，不加時放自簽憑證")
+	email := fs.String("email", "", "ACME 註冊信箱（--acme 必填）")
+	noStaging := fs.Bool("no-staging", false, "ACME 用正式環境；預設走 staging")
+	force := fs.Bool("force", false, "自簽時覆蓋卷裡已有的憑證檔")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New(use)
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	opts := ncb.Options{ACME: *acme, Email: *email, Staging: !*noStaging, Force: *force}
+	return ncb.Cert(context.Background(), podman.DefaultEnv(root, "podman"), root, opts)
 }
