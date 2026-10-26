@@ -11,15 +11,9 @@
 - 未驗證：`appctl` 的部署動詞與服務子命令都還沒在真環境跑過；GitHub Actions 的 `ci` 與 `release` 還沒在 GitHub 上跑過。清單見〈待辦〉。
 - 正式服務仍是舊版 `podman kube play` 部署的，還沒切換到 `appctl`。
 - 正式 gmm 現在有範本建出的測試資料：user alice、bob，group LAB，兩條帶 `.X` 的連線。密碼在主工作樹的 `services/gmm/random.csv`。第一次用真清單 seed 時，這些測試資料會被當成「以外」刪掉。
-- blocker：`appctl-quadlet` 分支推不上去。`pre-push` 跑的是主工作樹的舊 `bin/check-services.py`，它要 `.example`，分支已經沒有。CI 與預發布版延到 merge 後 push main 再做。
+- blocker：沒有。
 
-## 2. 進行中
-
-- 分支 `appctl-quadlet`：控制面改成 Go 的 `appctl`，podman 軌從 `podman kube play` 改成 Quadlet。
-- 做到哪：15 個任務與最終審查的修正都完成。
-- 下一步：備份主工作樹 gitignored 的真值檔到 repo 外，再 merge 回 main、push main、看第一次 CI，然後發 rc 預發布版。
-
-## 3. 待辦
+## 2. 待辦
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
@@ -65,6 +59,8 @@
 - podman 軌 `apply` 保留被拿掉的卷時不印 `Info:`；`deployed.json` 壞掉時的錯誤沒寫下一步。兩處都補訊息
 - 翻譯器遇到兩個卷用同一個 `claimName` 時產生重複的 `.volume`；改成合併或報錯
 - `appctl ncb cert` 的 `--email` 與網域以 `-` 開頭時沒擋，會被 certbot 當成旗標；ACME 的 stdout 被丟掉，失敗時看不到 certbot 的說明
+- `appctl ncb cert --acme` 的 certbot 呼叫補 `--non-interactive --keep-until-expiring`：lineage 已存在時重簽，certbot 可能停在互動選單而失敗
+- `services/gmm/sync.conf` 的 `GUACAMOLE_SERVER` 寫死主機埠 8080，podman 軌的 `appctl gmm` 仍讀它；改成從 `setting.conf` 查，像 smoke 與 `quay init` 一樣
 - 安裝 `yamllint`，對全部 `kustomization.yaml` 跑一次語法檢查
 
 **以下有觸發條件才做：**
