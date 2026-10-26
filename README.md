@@ -211,6 +211,8 @@ sudo appctl ncb cert --acme --email <信箱> --no-staging
 - 自簽不覆蓋卷裡已有的憑證檔，要換掉時加 `--force`。
 - `ncb.local` 是 mDNS 保留域（RFC 6762），Let's Encrypt 不簽，`--acme` 會直接拒絕。要用 ACME 得先把 `server_name` 改成公網網域。
 - ACME 走 webroot，nginx 要先在跑，所以第一次要先放自簽憑證。Let's Encrypt 的 rate limits 文件寫同一組網域每 7 天只簽 5 張重複憑證，所以預設走 staging，確認流程可行再加 `--no-staging`。
+- certbot 遇到已存在的 `live/<網域>/` 會拒絕建憑證。所以 `--acme` 在 `renewal/<網域>.conf` 不存在時（目錄是自簽放的），先把 `live/<網域>/` 移到 `live/<網域>.selfsigned/`（取代舊的），再用 `--cert-name <網域>` 跑 certbot。certbot 失敗時，自簽憑證搬回原處，nginx 照常能用。已經是 certbot 簽的憑證不移動。
+- nginx 沒在跑時，`ncb cert` 放好憑證但不 reload，改印出啟動指令：已部署過就 `sudo systemctl restart ncb-nginx.service`。
 
 ### grafana 的第一次登入
 

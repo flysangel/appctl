@@ -96,14 +96,23 @@ func say(env podman.Env, format string, a ...any) {
 	}
 }
 
-func selfSigned(ctx context.Context, env podman.Env, domain string, force bool) error {
+// volumeMount 回傳 ncb-certbot 卷在主機上的路徑。
+func volumeMount(ctx context.Context, env podman.Env) (string, error) {
 	out, err := env.Runner.Run(ctx, "podman", []string{"volume", "inspect", certbotVolume, "--format", "{{.Mountpoint}}"}, nil)
 	if err != nil {
-		return fmt.Errorf("查不到卷 %s，請先 sudo appctl apply ncb --track podman：%w", certbotVolume, err)
+		return "", fmt.Errorf("查不到卷 %s，請先 sudo appctl apply ncb --track podman：%w", certbotVolume, err)
 	}
 	mount := strings.TrimSpace(string(out))
 	if mount == "" {
-		return fmt.Errorf("卷 %s 沒有 Mountpoint", certbotVolume)
+		return "", fmt.Errorf("卷 %s 沒有 Mountpoint", certbotVolume)
+	}
+	return mount, nil
+}
+
+func selfSigned(ctx context.Context, env podman.Env, domain string, force bool) error {
+	mount, err := volumeMount(ctx, env)
+	if err != nil {
+		return err
 	}
 	dir := filepath.Join(mount, "live", domain)
 	certPath, keyPath := filepath.Join(dir, "fullchain.pem"), filepath.Join(dir, "privkey.pem")
@@ -200,15 +209,60 @@ func genSelfSigned(domain string) (certPEM, keyPEM []byte, err error) {
 	return certPEM, keyPEM, nil
 }
 
+// moveSelfSignedAside 在 live/<domain>/ 存在、但 renewal/<domain>.conf 不存在時（不是 certbot 的 lineage，
+// 是 selfSigned 放的），把它搬到 live/<domain>.selfsigned/（取代舊的）。certbot 遇到已存在的 live 目錄
+// 會拒絕建 lineage。回傳搬過去的路徑；沒搬時回空字串。
+func moveSelfSignedAside(mount, domain string) (string, error) {
+	live := filepath.Join(mount, "live", domain)
+	if _, err := os.Lstat(live); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	if _, err := os.Lstat(filepath.Join(mount, "renewal", domain+".conf")); err == nil {
+		return "", nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	aside := live + ".selfsigned"
+	if err := os.RemoveAll(aside); err != nil {
+		return "", err
+	}
+	if err := os.Rename(live, aside); err != nil {
+		return "", err
+	}
+	return aside, nil
+}
+
 func acme(ctx context.Context, env podman.Env, domain string, opts Options) error {
+	mount, err := volumeMount(ctx, env)
+	if err != nil {
+		return err
+	}
+	aside, err := moveSelfSignedAside(mount, domain)
+	if err != nil {
+		return fmt.Errorf("移開自簽憑證失敗：%w", err)
+	}
+	if aside != "" {
+		say(env, "Info: 已把自簽憑證移到 %s，讓 certbot 建立 %s 的憑證", aside, domain)
+	}
 	args := []string{"exec", certbotContainer, "certbot", "certonly", "--webroot", "-w", "/etc/letsencrypt/www",
-		"-d", domain, "--email", opts.Email, "--agree-tos"}
+		"-d", domain, "--cert-name", domain, "--email", opts.Email, "--agree-tos"}
 	if !opts.Production {
 		args = append(args, "--staging")
 		say(env, "Info: 用 Let's Encrypt staging 環境，簽出的憑證瀏覽器不信任；確認流程可行後再加 --no-staging（正式環境）")
 	}
 	if _, err := env.Runner.Run(ctx, "podman", args, nil); err != nil {
-		return fmt.Errorf("certbot 簽發失敗：%w", err)
+		err = fmt.Errorf("certbot 簽發失敗：%w", err)
+		if aside != "" {
+			// 搬回自簽憑證，nginx 才能繼續用它
+			live := filepath.Join(mount, "live", domain)
+			if rerr := os.Rename(aside, live); rerr != nil {
+				return errors.Join(err, fmt.Errorf("自簽憑證搬不回 %s，還在 %s：%w", live, aside, rerr))
+			}
+			say(env, "Info: 已把自簽憑證搬回 %s", live)
+		}
+		return err
 	}
 	say(env, "Success: certbot 已簽發 %s 的憑證", domain)
 	return reload(ctx, env)
@@ -237,7 +291,7 @@ func reload(ctx context.Context, env podman.Env) error {
 		return fmt.Errorf("憑證檔已放好，但無法 reload：%w", err)
 	}
 	if !running {
-		say(env, "Info: %s 沒在跑，沒有 reload；nginx 要有憑證才起得來，請跑 sudo appctl apply ncb --track podman", nginxContainer)
+		say(env, "Info: %s 沒在跑，沒有 reload；nginx 要有憑證才起得來，已部署過就跑 sudo systemctl restart %s.service，還沒部署就跑 sudo appctl apply ncb --track podman", nginxContainer, nginxContainer)
 		return nil
 	}
 	if _, err := env.Runner.Run(ctx, "podman", []string{"exec", nginxContainer, "nginx", "-s", "reload"}, nil); err != nil {

@@ -52,11 +52,12 @@ func TestACMERejectsLocal(t *testing.T) {
 
 func TestACMEDefaultsToStaging(t *testing.T) {
 	root, f, env, _ := setup(t, "ncb.example.com")
+	f.On("podman volume inspect", t.TempDir(), 0)
 	f.On("podman inspect", "true\n", 0)
 	if err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	want := "podman exec ncb-certbot certbot certonly --webroot -w /etc/letsencrypt/www -d ncb.example.com --email a@example.com --agree-tos --staging"
+	want := "podman exec ncb-certbot certbot certonly --webroot -w /etc/letsencrypt/www -d ncb.example.com --cert-name ncb.example.com --email a@example.com --agree-tos --staging"
 	if !f.Called(want) {
 		t.Fatalf("缺 %q，實際：%v", want, f.Lines())
 	}
@@ -67,6 +68,7 @@ func TestACMEDefaultsToStaging(t *testing.T) {
 
 func TestACMEProductionAndEmail(t *testing.T) {
 	root, f, env, _ := setup(t, "ncb.example.com")
+	f.On("podman volume inspect", t.TempDir(), 0)
 	if err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com", Production: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +174,7 @@ func TestSelfSignedNginxNotRunningIsInfo(t *testing.T) {
 	if err := Cert(context.Background(), env, root, Options{}); err != nil {
 		t.Fatalf("nginx 沒起來應只提示：%v", err)
 	}
-	if !strings.Contains(out.String(), "Info:") || !strings.Contains(out.String(), "sudo appctl apply ncb --track podman") {
+	if !strings.Contains(out.String(), "Info:") || !strings.Contains(out.String(), "sudo appctl apply ncb --track podman") || !strings.Contains(out.String(), "sudo systemctl restart ncb-nginx.service") {
 		t.Fatalf("缺提示：%s", out.String())
 	}
 	if f.Called("podman exec ncb-nginx") {
@@ -248,4 +250,121 @@ func TestForceReplacesAtomicallyWithoutTempLeftovers(t *testing.T) {
 	if len(ents) != 2 {
 		t.Fatalf("目錄應只有兩個檔：%v", ents)
 	}
+}
+
+// hookRunner 在 certbot 被呼叫的當下，呼叫 before 檢查卷裡的檔案狀態。
+type hookRunner struct {
+	*run.Fake
+	before func()
+}
+
+func (h hookRunner) Run(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
+	if strings.HasPrefix(run.Line(name, args), "podman exec ncb-certbot") && h.before != nil {
+		h.before()
+	}
+	return h.Fake.Run(ctx, name, args, stdin)
+}
+
+// acmeSetup 造一個卷，live/<domain>/ 放一份自簽憑證（renewal 不存在，不是 certbot 的 lineage）。
+func acmeSetup(t *testing.T) (root, mount string, f *run.Fake, env podman.Env, out *bytes.Buffer) {
+	t.Helper()
+	root, f, env, out = setup(t, "ncb.example.com")
+	mount = t.TempDir()
+	f.On("podman volume inspect ncb-certbot --format {{.Mountpoint}}", mount+"\n", 0)
+	f.On("podman inspect", "true\n", 0)
+	live := filepath.Join(mount, "live", "ncb.example.com")
+	if err := os.MkdirAll(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(live, "fullchain.pem"), []byte("self-signed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+func TestACMEMovesSelfSignedAsideBeforeCertbot(t *testing.T) {
+	root, mount, f, env, out := acmeSetup(t)
+	live := filepath.Join(mount, "live", "ncb.example.com")
+	aside := live + ".selfsigned"
+	// 舊的 .selfsigned 要被換掉
+	if err := os.MkdirAll(aside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(aside, "stale.pem"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checked := false
+	env.Runner = hookRunner{Fake: f, before: func() {
+		checked = true
+		if _, err := os.Stat(live); !os.IsNotExist(err) {
+			t.Errorf("呼叫 certbot 時 %s 應已移開：%v", live, err)
+		}
+		if b, err := os.ReadFile(filepath.Join(aside, "fullchain.pem")); err != nil || string(b) != "self-signed" {
+			t.Errorf("自簽憑證應移到 %s：%q %v", aside, b, err)
+		}
+		if _, err := os.Stat(filepath.Join(aside, "stale.pem")); !os.IsNotExist(err) {
+			t.Errorf("舊的 .selfsigned 應被取代：%v", err)
+		}
+	}}
+	if err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if !checked {
+		t.Fatalf("沒有呼叫 certbot：%v", f.Lines())
+	}
+	if !has(f.Lines(), "--cert-name ncb.example.com") {
+		t.Errorf("certbot 要帶 --cert-name：%v", f.Lines())
+	}
+	if !strings.Contains(out.String(), aside) {
+		t.Errorf("應提示自簽憑證移到哪裡：%s", out.String())
+	}
+}
+
+func TestACMEFailureRestoresSelfSigned(t *testing.T) {
+	root, mount, f, env, _ := acmeSetup(t)
+	f.OnError("podman exec ncb-certbot", &run.ExitError{Cmd: "certbot", Code: 1, Stderr: "challenge failed"})
+	err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com"})
+	if err == nil || !strings.Contains(err.Error(), "challenge failed") {
+		t.Fatalf("certbot 失敗應回錯：%v", err)
+	}
+	live := filepath.Join(mount, "live", "ncb.example.com")
+	if b, err := os.ReadFile(filepath.Join(live, "fullchain.pem")); err != nil || string(b) != "self-signed" {
+		t.Fatalf("certbot 失敗後自簽憑證應搬回 %s：%q %v", live, b, err)
+	}
+	if _, err := os.Stat(live + ".selfsigned"); !os.IsNotExist(err) {
+		t.Errorf(".selfsigned 應已搬回：%v", err)
+	}
+}
+
+func TestACMELeavesCertbotLineageAlone(t *testing.T) {
+	root, mount, f, env, _ := acmeSetup(t)
+	renewal := filepath.Join(mount, "renewal")
+	if err := os.MkdirAll(renewal, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(renewal, "ncb.example.com.conf"), []byte("# lineage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	live := filepath.Join(mount, "live", "ncb.example.com")
+	if b, err := os.ReadFile(filepath.Join(live, "fullchain.pem")); err != nil || string(b) != "self-signed" {
+		t.Errorf("certbot 的 lineage 不應移動：%q %v", b, err)
+	}
+	if _, err := os.Stat(live + ".selfsigned"); !os.IsNotExist(err) {
+		t.Errorf("不應產生 .selfsigned：%v", err)
+	}
+	if !has(f.Lines(), "--cert-name ncb.example.com") {
+		t.Errorf("certbot 要帶 --cert-name：%v", f.Lines())
+	}
+}
+
+func has(lines []string, sub string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			return true
+		}
+	}
+	return false
 }
