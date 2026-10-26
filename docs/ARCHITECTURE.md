@@ -15,7 +15,7 @@
 - 上游：k8s 軌部署到 infra-k8s 建好的叢集。
 - 叢集級 addon（LB、Ingress、cert-manager 等）在 infra-k8s，不在本 repo。本 repo 只放使用者面的服務。
 - push 護欄不算上游依賴。它是本 repo 自帶的 `.githooks/` 副本，由帳號層派工 hook 呼叫，不釘版。
-- 驗證與發布在 GitHub Actions：`ci` 每次 push 跑，`release` 在 push `v*` tag 時驗證後發布 Release。部署主機用 `install.sh` 從 Release 裝 `appctl`。
+- 驗證與發布在 GitHub Actions：`ci` 每次 push 跑，`release` 在 push 版本 tag（例如 `v0.1.0`、`v0.1.0-rc.1`，樣式見 `.github/workflows/release.yml` 的 `tags`）時驗證後發布 Release。部署主機用 `install.sh` 從 Release 裝 `appctl`。
 - 不管公網 DNS 與 DDNS。服務只給信任網段用，Ingress 主機名一律 `<svc>.local`，工作區沒有 repo 維護公網名稱。
 
 ## 2. 目錄結構
@@ -61,7 +61,7 @@ tests/                     F9 工具的 Python 測試
 services/<svc>/
   base/                    工作負載正本，兩軌共用；檔名是 kind 小寫
     kustomization.yaml     resources: 工作負載（映像完整參照直接寫在 manifest）
-  {podman,k8s}/            overlay；podman 軌可依主機分軌，例如 podman-4060ti
+  {podman,k8s}/            overlay
     kustomization.yaml     namespace:、resources: [../base]；有機密者另加 ../secret
   podman/setting.conf      podman 軌的主機埠（INI，文法在檔頭）
   secret/                  （有機密的服務才有）機密宣告，兩軌共用
@@ -87,6 +87,8 @@ services/<svc>/
 根層除了 `~/.claude/rules/directories.md`〈根層〉列的固定檔，另有三個檔：`go.mod`、`go.sum` 要放在 Go module 的根；`install.sh` 的下載網址寫在 README 與檔頭，搬家會讓舊網址失效。
 
 要看渲染結果，現跑 `appctl render <svc> --track <軌>`。單一服務的完整工作負載要從 `base/` 讀起，overlay 只帶該軌的差異。
+
+名字以 `podman` 開頭的目錄（例如 `podman-<主機>`）也算 podman 軌：`repo.Tracks`、部署動詞、`render`、`check`（依主機分組算撞埠）、gmm 與 quay 子命令都認得。`ncb cert` 與 `TestTranslateAllServices` 只看 `podman`，`smoke` 優先用 `podman`。目前沒有這種目錄。
 
 `services/finetune/` 與對應的測試刻意不進版控，只存本機。
 
@@ -213,7 +215,7 @@ minio 的 podman overlay 把 `replicas` 改成 1、`args` 改成單一目錄，�
 | quay 的 `config.yaml` 也進版控 | `secretGenerator` 的 `files:` 不做變數替換，含密碼的設定檔只能整份維護；跟 `secret.env` 一樣存 demo 值 | DB 與 redis 密碼同時寫在 `secret.env` 與 `config.yaml`，要兩處一起改 | `appctl check` 與 `appctl check-secret quay` 比對兩處 |
 | 服務子命令讀 repo 裡進版控的檔 | gmm 與 quay 子命令在操作者主機的 clone 跑，機密從 clone 裡的檔讀，manifest 不放真值，也不在執行期 clone repo | 一定要在 clone 裡跑；要排程得靠主機的 cron | 無程式擋 |
 | 不釘 `appctl` 版本 | `install.sh` 預設裝最新的正式版，少一份要同步的版本清單 | 部署主機的 binary 可能跟 clone 的 manifest 不同代，新欄位要等主機更新 binary 才翻得過 | 無程式擋 |
-| Secret 與 ConfigMap 名稱不加內容雜湊 | podman 的 secret store 沒有 owner reference 與 GC，雜湊輪替會留下永久孤兒；`kubectl delete -f -` 也只刪得掉當下那個雜湊 | k8s 軌改機密或設定不會觸發滾動更新，要手動 `rollout restart`。podman 軌由部署紀錄比對 hash，有變的單元自動 restart | `internal/podman` 的 `TestApplyRestartsOnSecretChange`、`TestApplyRestartsOnConfigChange` |
+| Secret 與 ConfigMap 名稱不加內容雜湊 | podman 的 secret store 沒有 owner reference 與 GC，雜湊輪替會留下永久孤兒；`kubectl delete -f -` 也只刪得掉當下那個雜湊 | k8s 軌改機密或設定不會觸發滾動更新，要手動 `rollout restart`。podman 軌由部署紀錄比對 hash，有變的單元自動 restart | 無程式擋 |
 | PVC 容量寫死在 `k8s/pvc.yaml`（minio 在 `volumeClaimTemplates`） | 單一環境下這個值不會變；抽成參數會讓它看起來可以隨時調整 | 要改容量得改這些檔，而且只在第一次部署生效 | 無程式擋 |
 | 不留部署鉤子（`post-apply.sh`） | 這個機制存在過三個版本，始終沒有任何服務用到 | 真的需要「部署後才能做的初始化」時要重新設計，目前由服務子命令負責 | 無程式擋 |
 | 映像優先用 tag 釘，不用 digest | 和其他服務的寫法一致，比較好讀 | 同一個 tag 可能被重推。全部容器 `imagePullPolicy: IfNotPresent`，同 tag 重推後已有快取的節點或 podman 主機不會重拉，`apply` 成功但跑的是舊層。minio 與 juicefs 還是 digest，因為 mirror 沒有版本 tag | 無程式擋 |

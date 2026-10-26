@@ -237,7 +237,7 @@ podman 軌的主機埠綁主機的所有介面，同網段的其他主機都連�
 | 上游 | images | 映像推上 registry 後，版號直接寫進各服務 manifest 的 `image:` |
 | 上游 | infra-k8s | 提供 k8s 軌部署用的叢集 |
 | 護欄 | 帳號層派工 hook | 呼叫本 repo 自帶的 `.githooks/pre-push` |
-| 驗證與發布 | GitHub Actions | 每次 push 跑 `.github/workflows/ci.yml`；push `v*` tag 時 `.github/workflows/release.yml` 驗證後發布 Release |
+| 驗證與發布 | GitHub Actions | 每次 push 跑 `.github/workflows/ci.yml`；push 版本 tag（例如 `v0.1.0`、`v0.1.0-rc.1`，樣式見 `.github/workflows/release.yml` 的 `tags`）時，`release.yml` 驗證後發布 Release |
 
 ## 4. 貢獻
 

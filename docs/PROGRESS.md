@@ -58,6 +58,10 @@
 - `appctl gmm` 的 `mapping.env` 補 CRLF 與行尾空白的測試：拿掉那行處理時，seed 會刪光重建全部連線
 - `k8s.PortForward` 讀不到埠時先 Wait 後 Stop，kubectl 輸出超長行時可能卡住；補逾時與 ctx 取消的測試
 - `.github/workflows/` 的 action 改釘 commit SHA
+- k8s 軌 `delete` 遇到 StatefulSet 時仍印「含資料卷」，但動態 PVC 沒刪；而且先渲染再確認，manifest 壞掉時連確認都到不了。訊息改成依實際刪了什麼，確認移到渲染前
+- podman 軌 `apply` 保留被拿掉的卷時不印 `Info:`；`deployed.json` 壞掉時的錯誤沒寫下一步。兩處都補訊息
+- 翻譯器遇到兩個卷用同一個 `claimName` 時產生重複的 `.volume`；改成合併或報錯
+- `appctl ncb cert` 的 `--email` 與網域以 `-` 開頭時沒擋，會被 certbot 當成旗標；ACME 的 stdout 被丟掉，失敗時看不到 certbot 的說明
 - 安裝 `yamllint`，對全部 `kustomization.yaml` 跑一次語法檢查
 
 **以下有觸發條件才做：**
@@ -69,6 +73,7 @@
 - podman secret 名長度上限 253 沒有檢查（服務名、Secret 名或鍵名變長時）
 - `gmm.ReadConf` 是通用的 env 解析器卻放在 `internal/gmm`，quay 也用；沒加引號的值遇到空白會截斷。抽成 `internal/envfile`（第三個子命令要讀 env 檔時）
 - `appctl` 沒處理 SIGTERM，port-forward 的 kubectl 可能留著（有人用 cron 或 systemd 跑子命令時）
+- `appctl check` 補一道：`secret/kustomization.yaml` 要有 `disableNameSuffixHash: true`，現在沒有程式擋（加新服務的機密時）
 - `.gitignore` 刪掉沒有對應目錄的 `**/secrets/` 與 `build/` 規則（改這支檔時）
 - `tests/test_manifest_diff.py` 合併重複的 helper（`run_diff` 與 `_run`），寫死的 `"python3"` 改成 `sys.executable`（改這支檔時）
 - 同 pod 多容器的服務（quay、gmm、grafana）都沒有啟動順序控制：quay-app 先起來時連不上 redis、guacamole 等 mariadb 建 schema、grafana 連不上 3306，都靠重啟自癒。補就緒等待或 readinessProbe（上游改變啟動時序，或不再自癒時）

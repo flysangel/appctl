@@ -22,9 +22,9 @@
 
 `services/*/secret/secret.env`、`services/quay/secret/config.yaml`、`services/gmm/mapping.env`、`services/gmm/sync.secret.env` 都進版控，內容是 demo 值。repo 是公開的。
 
-- 實際環境由操作者直接改部署主機 clone 裡的檔。在部署主機上不要 `git commit -a`，也不要把這些檔的改動 push 出去。
+- 實際環境由操作者直接改部署主機 clone 裡的檔，坑見〈部署主機改了進版控的機密檔〉。
 - `services/gmm/random.csv` 是 seed 自動產生的使用者密碼，gitignored，唯一留存處。不要 `cat`，不要 `git add -f`。
-- 測試假值與 demo 值一律含 `fake`、`example`、`changeme`、`dummy` 其中一個字，或短於 8 個字元。理由見〈測試假值要過帳號層 gitleaks〉。
+- 測試假值與 demo 值的寫法見〈測試假值要過帳號層 gitleaks〉。
 
 ### 會刪資料的動作，先問使用者
 
@@ -48,7 +48,7 @@
 
 改 manifest 的 `image:`。juicefs 與 minio 共用同一顆 digest，用 `command grep -rln 'sha256:' services/` 找出全部位置，加 `command` 的理由見 `~/.claude/CLAUDE.md`〈Claude 下的 `grep` 會跳過 gitignore 的檔〉。
 
-改完跑 `appctl check-images <svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。
+改完跑 `go run ./cmd/appctl check-images <svc>`。同一個 tag 被重推時，有快取的節點或 podman 主機不會重拉（`IfNotPresent`，見 `docs/ARCHITECTURE.md`〈設計取捨〉），改 tag 或先清本機映像。跨大版本時，查上游有沒有改啟動時序或設定介面。
 
 ### 寫程式的規矩
 
@@ -61,7 +61,7 @@
 
 ### 不要手寫 Quadlet 單元，systemd 會改寫 `%` 與 `$`
 
-systemd 把單元檔裡的 `%T` 這類字樣換成路徑，`$VAR` 換成環境變數，不報錯。filebrowser 與 juicefs 的指令有 `$`。翻譯器（`internal/quadlet` 的 `Escape`）把 `%` 寫成 `%%`、`$` 寫成 `$$`。要改單元內容，改翻譯器或 manifest，不要直接改 `/etc/containers/systemd/` 底下的檔：下次 `apply` 會蓋掉。
+systemd 把單元檔裡的 `%T` 這類字樣換成路徑，`$VAR` 換成環境變數，不報錯。filebrowser 與 juicefs 的指令有 `$`。翻譯器（`internal/quadlet` 的 `Escape`）把 `%` 寫成 `%%`、`$` 寫成 `$$`。要改單元內容，改翻譯器或 manifest，不要直接改 `/etc/containers/systemd/` 底下的 `.container`、`.volume`，也不要改 `/etc/systemd/system/<svc>-pod.service`：下次 `apply` 會蓋掉。
 
 ### manifest 加新欄位前，先擴充翻譯器
 
@@ -77,11 +77,15 @@ systemd 把單元檔裡的 `%T` 這類字樣換成路徑，`$VAR` 換成環境�
 
 ### 測試假值要過帳號層 gitleaks
 
-帳號層 gitleaks 規則擋 `password: <8 字以上的值>` 這類寫法（鍵名含 password、passwd、secret、token、api_key、apikey）。commit 歷史裡出現過就推不出去，只能改寫歷史。測試與 demo 的值一律含 `fake`、`example`、`changeme`、`dummy` 其中一個字，或短於 8 個字元。
+帳號層 gitleaks 規則擋設定檔寫法的明文密碼，例如 `password: <8 字以上的值>`。commit 歷史裡出現過就推不出去，只能改寫歷史。測試與 demo 的值一律含 `~/.config/git/gitleaks.toml` 的 `stopwords` 其中一個字，或短於 8 個字元。規則細節讀那個檔。
 
 ### push 護欄跑的是主工作樹的腳本
 
 `pre-push` 的規則檔與檢查腳本取自主工作樹，不取自你在推的分支，見 `~/.claude/rules/githooks.md`〈在 worktree 裡 push 驗不到你剛改的 hook〉。分支刪掉或改了某支檢查時，merge 前推分支會被主工作樹的舊檢查擋下。merge 後，`.githooks/pre-push` 的 `REPO_CHECKS` 指向的腳本已不存在，那道檢查印 `Info:` 略過，靠 CI 的 `appctl check` 補上。
+
+### 部署主機改了進版控的機密檔
+
+實際環境直接改部署主機 clone 裡的 demo 機密檔。上游改了同一個檔時，`git pull` 會衝突。在部署主機上 `git commit -a` 會把真密碼帶進 commit，gitleaks 不保證擋得住。所以部署主機的 clone 只 pull，不 commit，也不 push。
 
 ### 這台主機的 go 不在非登入 shell 的 PATH
 
@@ -89,7 +93,7 @@ systemd 把單元檔裡的 `%T` 這類字樣換成路徑，`$VAR` 換成環境�
 
 ### 映像還在不在 registry，push 時不會查
 
-`appctl check` 擋短名、缺 tag 與 `latest`。映像是不是還在來源 registry，只有 `appctl check-images <svc>` 查，push 時與 CI 都不跑：它要逐一連 registry。改了 manifest 的 `image:`，要自己跑。
+`appctl check` 擋短名、缺 tag 與 `latest`。映像是不是還在來源 registry，只有 `go run ./cmd/appctl check-images <svc>` 查，push 時與 CI 都不跑：它要逐一連 registry。改了 manifest 的 `image:`，要自己跑。
 
 ### `services/` 底下不要寫 `docker.io/` 字面值
 
@@ -116,8 +120,8 @@ push 護欄的 forbidden 掃描會掃 `services/` 的新增行，註解也算。
 
 ### 改了哪類檔要多驗什麼
 
-- 改了 manifest 或 `kustomization.yaml`：跑 `appctl render <svc> --track <軌>`，兩軌都跑；podman 軌另外會被 `TestTranslateAllServices` 翻譯一次。
-- 改了 manifest 的 `image:`：跑 `appctl check-images <svc>`。
+- 改了 manifest 或 `kustomization.yaml`：跑 `go run ./cmd/appctl render <svc> --track <軌>`，兩軌都跑；podman 軌另外會被 `TestTranslateAllServices` 翻譯一次。
+- 改了 manifest 的 `image:`：跑 `go run ./cmd/appctl check-images <svc>`。
 - 改動會影響很多服務的渲染時（例如改 base 的共用寫法），對每個受影響的服務與軌跑 `bash bin/render-diff.sh <svc> <軌> main`，它比對 `main` 與工作樹的渲染產物。
 - 改了 `internal/quadlet`：更新 `internal/quadlet/testdata/` 的 golden 檔前，逐行看懂差異，再提交。
 - 改了 `.githooks/` 或 `bin/check-*.py`：照 `~/.claude/rules/githooks.md`〈改了 `.githooks/` 底下任何東西〉再跑一次真的 hook。手動跑時照 `~/.claude/rules/githooks.md`〈直接跑 `pre-push` 不餵 stdin 會得到假綠燈〉。
@@ -142,9 +146,9 @@ podman 軌的煙測是 `sudo appctl smoke <svc>...`，步驟與各服務的探�
 | 沒問使用者就跑 `appctl delete`、`appctl smoke`、`appctl gmm seed`，或刪 PVC | 會刪資料，不能復原 |
 | 被歷史 commit 擋 push 時，自己 squash 或改寫歷史 | 選哪條路是使用者的決定，先停下來問。HEAD 的內容也要修乾淨，squash 帶走的是 HEAD |
 | 順手改 `docs/PROGRESS.md` 列的既有問題 | 不在這次的範圍內，會讓 diff 混進無關改動 |
-| 手寫或手改 `/etc/containers/systemd/` 底下的單元 | 下次 `apply` 會蓋掉；`%` 與 `$` 沒跳脫時 systemd 靜默改寫指令 |
+| 手寫或手改 `/etc/containers/systemd/` 底下的單元或 `/etc/systemd/system/<svc>-pod.service` | 下次 `apply` 會蓋掉；`%` 與 `$` 沒跳脫時 systemd 靜默改寫指令 |
 | 用 `podman kube play` 或 `podman kube down` 部署、拆除服務 | 這條路已經拿掉。舊 pod 會占住主機埠，`appctl apply` 會拒絕部署 |
 | 在 `docs/` 放四大文件以外的檔 | 沒人連得到，會和程式漂移。`docs/superpowers/` 與 `docs/tickets/` 是本機暫存，已 gitignore |
 | 把機密放進命令列、URL、scratchpad 或 commit 訊息 | 會出現在 `ps`、log 或版控 |
-| 在部署主機的 clone 上 commit 或 push | 機密檔已經改成真值，gitleaks 不保證擋得住 |
+| 在部署主機的 clone 上 commit 或 push | 見〈部署主機改了進版控的機密檔〉 |
 | 在本 repo 設 local 或 worktree 作用域的 `core.hooksPath` | git 改用那個目錄，不經過帳號層派工 hook，機密掃描與本 repo 的 `pre-push` 都靜默失效。`task doctor` 會查。細節見 `~/.claude/rules/githooks.md`〈repo 自設 local `core.hooksPath` 會繞過帳號層機密掃描〉 |
