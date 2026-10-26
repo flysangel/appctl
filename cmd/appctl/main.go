@@ -15,6 +15,7 @@ import (
 	"github.com/flysangel/appctl/internal/gmm"
 	"github.com/flysangel/appctl/internal/k8s"
 	"github.com/flysangel/appctl/internal/podman"
+	"github.com/flysangel/appctl/internal/quay"
 	"github.com/flysangel/appctl/internal/render"
 	"github.com/flysangel/appctl/internal/repo"
 	"github.com/flysangel/appctl/internal/run"
@@ -42,6 +43,8 @@ func main() {
 		err = runCheckSecret(os.Args[2:])
 	case "gmm":
 		err = runGmm(os.Args[2:])
+	case "quay":
+		err = runQuay(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -57,7 +60,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>\n      appctl gmm seed|check --track <軌>")
+	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>\n      appctl gmm seed|check --track <軌>\n      appctl quay init --track <軌>")
 }
 
 // parseSvcTrack 解析 <svc> --track <軌>，<svc> 在 flag 前後都可以。
@@ -346,4 +349,50 @@ func runGmm(args []string) error {
 		return gmm.Seed(ctx, opts)
 	}
 	return gmm.Check(ctx, opts)
+}
+
+// runQuay 處理 quay init。k8s 軌先 port-forward svc/quay，用完就停；
+// podman 軌連 setting.conf 發佈的主機埠 8080。一般使用者身分就能跑。
+func runQuay(args []string) error {
+	const use = "用法：appctl quay init --track <軌>"
+	if len(args) == 0 || args[0] != "init" {
+		return errors.New(use)
+	}
+	fs := flag.NewFlagSet("quay init", flag.ContinueOnError)
+	t := fs.String("track", "", "軌目錄名，例如 k8s 或 podman")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || *t == "" {
+		return errors.New(use)
+	}
+	track := *t
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	tracks, err := repo.Tracks(root, "quay")
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(tracks, track) {
+		return fmt.Errorf("quay 沒有 %s 軌（有：%s）", track, strings.Join(tracks, "、"))
+	}
+	ctx := context.Background()
+	opts := quay.Options{Root: root, Out: os.Stdout}
+	switch {
+	case track == "k8s":
+		port, stop, err := k8s.PortForward(ctx, run.Exec{}, "svc/quay", 8080)
+		if err != nil {
+			return err
+		}
+		defer stop()
+		opts.BaseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+		fmt.Printf("Info: 已用 kubectl port-forward 連到 svc/quay，本機埠 %d\n", port)
+	case strings.HasPrefix(track, "podman"):
+		opts.BaseURL = "http://127.0.0.1:8080"
+	default:
+		return fmt.Errorf("%s 軌的 quay init 還沒實作", track)
+	}
+	return quay.Init(ctx, opts)
 }
