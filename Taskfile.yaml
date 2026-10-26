@@ -54,8 +54,9 @@ tasks:
       - python3 bin/check-secret.py '{{.SVC | default ""}}'
 
   test:
-    desc: "[開發] 單元測試，離線；自動收集 tests/test_*.py，每支都要印 ALL <n> PASS"
+    desc: "[開發] 單元測試，離線；先跑 go test，再自動收集 tests/test_*.py，每支都要印 ALL <n> PASS"
     cmds:
+      - go test ./...
       - python3 bin/run-tests.py
 
   check:image:

@@ -38,3 +38,6 @@ __pycache__/
 /tests/test_build_dataset.py
 /tests/test_slides_extract.py
 /tests/test_split_corpus.py
+
+# appctl 編譯產物
+/bin/appctl

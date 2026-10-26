@@ -42,6 +42,7 @@ want() {
 need task 'go-task' 'Falls back to the "default" task' task --help
 need kubectl 'kubectl' '^Client Version: ' kubectl version --client
 need python3 'Python 3' '^Python 3\.' python3 --version
+need go 'Go' '^go version go' go version
 need shellcheck 'ShellCheck' 'ShellCheck' shellcheck --version
 need gitleaks 'gitleaks' 'Gitleaks scans code' gitleaks --help
 
