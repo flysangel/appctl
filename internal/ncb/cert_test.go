@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +41,7 @@ func TestCertReadsServerName(t *testing.T) {
 
 func TestACMERejectsLocal(t *testing.T) {
 	root, f, env, _ := setup(t, "ncb.local")
-	err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com", Staging: true})
+	err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com"})
 	if err == nil || !strings.Contains(err.Error(), ".local") {
 		t.Fatalf("應拒絕 .local：%v", err)
 	}
@@ -53,7 +52,8 @@ func TestACMERejectsLocal(t *testing.T) {
 
 func TestACMEDefaultsToStaging(t *testing.T) {
 	root, f, env, _ := setup(t, "ncb.example.com")
-	if err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com", Staging: true}); err != nil {
+	f.On("podman inspect", "true\n", 0)
+	if err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com"}); err != nil {
 		t.Fatal(err)
 	}
 	want := "podman exec ncb-certbot certbot certonly --webroot -w /etc/letsencrypt/www -d ncb.example.com --email a@example.com --agree-tos --staging"
@@ -65,9 +65,9 @@ func TestACMEDefaultsToStaging(t *testing.T) {
 	}
 }
 
-func TestACMENoStagingAndEmail(t *testing.T) {
+func TestACMEProductionAndEmail(t *testing.T) {
 	root, f, env, _ := setup(t, "ncb.example.com")
-	if err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com"}); err != nil {
+	if err := Cert(context.Background(), env, root, Options{ACME: true, Email: "a@example.com", Production: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, l := range f.Lines() {
@@ -96,6 +96,7 @@ func TestSelfSignedWritesFiles(t *testing.T) {
 	root, f, env, out := setup(t, "ncb.local")
 	mount := t.TempDir()
 	f.On("podman volume inspect ncb-certbot --format {{.Mountpoint}}", mount+"\n", 0)
+	f.On("podman inspect", "true\n", 0)
 	if err := Cert(context.Background(), env, root, Options{}); err != nil {
 		t.Fatal(err)
 	}
@@ -137,6 +138,7 @@ func TestSelfSignedRefusesOverwriteUnlessForce(t *testing.T) {
 	root, f, env, _ := setup(t, "ncb.local")
 	mount := t.TempDir()
 	f.On("podman volume inspect", mount, 0)
+	f.On("podman inspect", "true\n", 0)
 	dir := filepath.Join(mount, "live", "ncb.local")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -162,18 +164,88 @@ func TestSelfSignedRefusesOverwriteUnlessForce(t *testing.T) {
 	}
 }
 
-func TestSelfSignedReloadFailureIsInfo(t *testing.T) {
+func TestSelfSignedNginxNotRunningIsInfo(t *testing.T) {
 	root, f, env, out := setup(t, "ncb.local")
 	mount := t.TempDir()
 	f.On("podman volume inspect", mount, 0)
-	f.OnError("podman exec ncb-nginx", errors.New("no such container"))
+	f.On("podman container exists ncb-nginx", "", 1)
 	if err := Cert(context.Background(), env, root, Options{}); err != nil {
 		t.Fatalf("nginx 沒起來應只提示：%v", err)
 	}
 	if !strings.Contains(out.String(), "Info:") || !strings.Contains(out.String(), "sudo appctl apply ncb --track podman") {
 		t.Fatalf("缺提示：%s", out.String())
 	}
+	if f.Called("podman exec ncb-nginx") {
+		t.Fatal("沒在跑不應 exec")
+	}
 	if _, err := os.Stat(filepath.Join(mount, "live", "ncb.local", "privkey.pem")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNginxStoppedContainerIsInfo(t *testing.T) {
+	root, f, env, out := setup(t, "ncb.local")
+	f.On("podman volume inspect", t.TempDir(), 0)
+	f.On("podman inspect", "false\n", 0)
+	if err := Cert(context.Background(), env, root, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Info:") || f.Called("podman exec ncb-nginx") {
+		t.Fatalf("停止中的容器應只提示：%s", out.String())
+	}
+}
+
+func TestReloadFailureWhileRunningIsError(t *testing.T) {
+	for _, acmeMode := range []bool{false, true} {
+		root, f, env, _ := setup(t, "ncb.example.com")
+		f.On("podman volume inspect", t.TempDir(), 0)
+		f.On("podman inspect", "true\n", 0)
+		f.OnError("podman exec ncb-nginx", &run.ExitError{Cmd: "podman exec", Code: 1, Stderr: "nginx: configuration file test failed"})
+		err := Cert(context.Background(), env, root, Options{ACME: acmeMode, Email: "a@example.com"})
+		if err == nil || !strings.Contains(err.Error(), "test failed") || !strings.Contains(err.Error(), "已放好") {
+			t.Fatalf("acme=%v 在跑但 reload 失敗應回錯並帶 stderr：%v", acmeMode, err)
+		}
+	}
+}
+
+func TestExistsQueryErrorIsNotFalse(t *testing.T) {
+	root, f, env, _ := setup(t, "ncb.local")
+	f.On("podman volume inspect", t.TempDir(), 0)
+	f.On("podman container exists ncb-nginx", "", 125)
+	if err := Cert(context.Background(), env, root, Options{}); err == nil {
+		t.Fatal("exists 回 125 應回錯")
+	}
+}
+
+func TestServerNameParsing(t *testing.T) {
+	cases := map[string]string{
+		"server_name a.example b.example; # note": "a.example",
+		"server_name   c.example;# x":             "c.example",
+		"server_name d.example":                   "d.example",
+	}
+	for line, want := range cases {
+		p := filepath.Join(t.TempDir(), "x.conf")
+		if err := os.WriteFile(p, []byte("server {\n  "+line+"\n}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := ServerName(p); err != nil || got != want {
+			t.Errorf("%q → %q, %v（要 %q）", line, got, err, want)
+		}
+	}
+}
+
+func TestForceReplacesAtomicallyWithoutTempLeftovers(t *testing.T) {
+	root, f, env, _ := setup(t, "ncb.local")
+	mount := t.TempDir()
+	f.On("podman volume inspect", mount, 0)
+	f.On("podman container exists ncb-nginx", "", 1)
+	for i := 0; i < 2; i++ {
+		if err := Cert(context.Background(), env, root, Options{Force: i == 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ents, _ := os.ReadDir(filepath.Join(mount, "live", "ncb.local"))
+	if len(ents) != 2 {
+		t.Fatalf("目錄應只有兩個檔：%v", ents)
 	}
 }

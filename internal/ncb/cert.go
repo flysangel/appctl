@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/flysangel/appctl/internal/podman"
+	"github.com/flysangel/appctl/internal/run"
 )
 
 const (
@@ -31,10 +32,10 @@ const (
 
 // Options 是 Cert 的輸入。
 type Options struct {
-	ACME    bool   // true 時走 Let's Encrypt，false 時放自簽憑證
-	Email   string // ACME 必填
-	Staging bool   // ACME 用 staging 環境；CLI 預設 true
-	Force   bool   // 自簽時允許覆蓋卷裡已有的憑證檔
+	ACME       bool   // true 時走 Let's Encrypt，false 時放自簽憑證
+	Email      string // ACME 必填
+	Force      bool   // 自簽時允許覆蓋卷裡已有的憑證檔
+	Production bool   // ACME 用正式環境；零值是 staging，避免誤打正式環境撞 rate limit
 }
 
 // Cert 依 default.conf 的第一個 server_name 放憑證，再 reload nginx。要 root。
@@ -122,34 +123,44 @@ func selfSigned(ctx context.Context, env podman.Env, domain string, force bool) 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if err := writeFile(certPath, certPEM, 0o644); err != nil {
-		return err
-	}
 	if err := writeFile(keyPath, keyPEM, 0o600); err != nil {
 		return err
 	}
-	say(env, "Success: 已放自簽憑證到 %s（有效 %d 天，瀏覽器會警告不受信任）", dir, selfSignedDays)
-	reload(ctx, env)
-	return nil
-}
-
-// writeFile 先刪舊檔再建新檔，權限不受既有檔影響，也不跟著符號連結寫到別處。
-func writeFile(path string, data []byte, mode os.FileMode) error {
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := writeFile(certPath, certPEM, 0o644); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	say(env, "Success: 已放自簽憑證到 %s（有效 %d 天，瀏覽器會警告不受信任）", dir, selfSignedDays)
+	return reload(ctx, env)
+}
+
+// writeFile 在同目錄建暫存檔（O_EXCL，先設好權限）再 rename 蓋過去：
+// 不跟著符號連結寫到別處，中途失敗也不會留下半個檔。
+func writeFile(path string, data []byte, mode os.FileMode) error {
+	tmp, err := stage(path, data, mode)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
 		return err
 	}
-	if err := f.Close(); err != nil {
-		return err
+	return nil
+}
+
+func stage(path string, data []byte, mode os.FileMode) (string, error) {
+	tmp := path + ".tmp"
+	os.Remove(tmp)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return "", err
 	}
-	return os.Chmod(path, mode)
+	_, werr := f.Write(data)
+	cerr := f.Close()
+	if err := errors.Join(werr, cerr, os.Chmod(tmp, mode)); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return tmp, nil
 }
 
 func genSelfSigned(domain string) (certPEM, keyPEM []byte, err error) {
@@ -192,23 +203,46 @@ func genSelfSigned(domain string) (certPEM, keyPEM []byte, err error) {
 func acme(ctx context.Context, env podman.Env, domain string, opts Options) error {
 	args := []string{"exec", certbotContainer, "certbot", "certonly", "--webroot", "-w", "/etc/letsencrypt/www",
 		"-d", domain, "--email", opts.Email, "--agree-tos"}
-	if opts.Staging {
+	if !opts.Production {
 		args = append(args, "--staging")
-		say(env, "Info: 用 Let's Encrypt staging 環境，簽出的憑證瀏覽器不信任；確認流程可行後再加 --no-staging")
+		say(env, "Info: 用 Let's Encrypt staging 環境，簽出的憑證瀏覽器不信任；確認流程可行後再加 --no-staging（正式環境）")
 	}
 	if _, err := env.Runner.Run(ctx, "podman", args, nil); err != nil {
 		return fmt.Errorf("certbot 簽發失敗：%w", err)
 	}
 	say(env, "Success: certbot 已簽發 %s 的憑證", domain)
-	reload(ctx, env)
-	return nil
+	return reload(ctx, env)
 }
 
-// reload 讓 nginx 載入新憑證。nginx 還沒起來時只提示，不算失敗：憑證檔已經放好。
-func reload(ctx context.Context, env podman.Env) {
+// nginxRunning 查 ncb-nginx 是否在跑。exists 只有結束碼 1 算不存在，其他非零照錯誤回。
+func nginxRunning(ctx context.Context, env podman.Env) (bool, error) {
+	if _, err := env.Runner.Run(ctx, "podman", []string{"container", "exists", nginxContainer}, nil); err != nil {
+		if code, ok := run.ExitCode(err); ok && code == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("查不出 %s 是否存在：%w", nginxContainer, err)
+	}
+	out, err := env.Runner.Run(ctx, "podman", []string{"inspect", "--format", "{{.State.Running}}", nginxContainer}, nil)
+	if err != nil {
+		return false, fmt.Errorf("查不出 %s 是否在跑：%w", nginxContainer, err)
+	}
+	return strings.TrimSpace(string(out)) == "true", nil
+}
+
+// reload 讓 nginx 載入新憑證。nginx 沒在跑時只提示：憑證檔已經放好，apply 時 nginx 會讀到。
+// nginx 在跑但 reload 失敗是真的錯誤（例如新憑證讓 nginx -t 失敗），回錯並帶 stderr。
+func reload(ctx context.Context, env podman.Env) error {
+	running, err := nginxRunning(ctx, env)
+	if err != nil {
+		return fmt.Errorf("憑證檔已放好，但無法 reload：%w", err)
+	}
+	if !running {
+		say(env, "Info: %s 沒在跑，沒有 reload；nginx 要有憑證才起得來，請跑 sudo appctl apply ncb --track podman", nginxContainer)
+		return nil
+	}
 	if _, err := env.Runner.Run(ctx, "podman", []string{"exec", nginxContainer, "nginx", "-s", "reload"}, nil); err != nil {
-		say(env, "Info: 無法 reload %s（%v）；nginx 要有憑證才起得來，請跑 sudo appctl apply ncb --track podman", nginxContainer, err)
-		return
+		return fmt.Errorf("憑證檔已放好，但 %s reload 失敗：%w", nginxContainer, err)
 	}
 	say(env, "Success: 已 reload %s", nginxContainer)
+	return nil
 }

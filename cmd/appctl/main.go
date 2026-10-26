@@ -421,6 +421,6 @@ func runNcb(args []string) error {
 	if err != nil {
 		return err
 	}
-	opts := ncb.Options{ACME: *acme, Email: *email, Staging: !*noStaging, Force: *force}
+	opts := ncb.Options{ACME: *acme, Email: *email, Production: *noStaging, Force: *force}
 	return ncb.Cert(context.Background(), podman.DefaultEnv(root, "podman"), root, opts)
 }
