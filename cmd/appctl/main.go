@@ -23,6 +23,9 @@ import (
 	"github.com/flysangel/appctl/internal/smoke"
 )
 
+// version 由 release 建置時以 -ldflags "-X main.version=<tag>" 注入。
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -48,6 +51,8 @@ func main() {
 		err = runQuay(os.Args[2:])
 	case "ncb":
 		err = runNcb(os.Args[2:])
+	case "version":
+		fmt.Println(version)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -63,7 +68,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>\n      appctl gmm seed|check --track <軌>\n      appctl quay init --track <軌>\n      sudo appctl ncb cert [--force] | [--acme --email <信箱> [--no-staging]]")
+	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl version\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>\n      appctl gmm seed|check --track <軌>\n      appctl quay init --track <軌>\n      sudo appctl ncb cert [--force] | [--acme --email <信箱> [--no-staging]]")
 }
 
 // parseSvcTrack 解析 <svc> --track <軌>，<svc> 在 flag 前後都可以。

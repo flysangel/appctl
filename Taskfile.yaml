@@ -30,7 +30,7 @@ tasks:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
       - go run ./cmd/appctl check
-      - shellcheck -S error -x bin/svc.sh bin/doctor.sh bin/render-diff.sh
+      - shellcheck -S error -x bin/svc.sh bin/doctor.sh bin/render-diff.sh install.sh
       - shellcheck -S warning .githooks/pre-push
 
   bootstrap:
