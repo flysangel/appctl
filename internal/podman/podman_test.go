@@ -58,6 +58,7 @@ spec:
           mountPath: /etc/fb
         - name: data
           mountPath: /srv
+%SIDECAR%
       volumes:
       - name: conf
         configMap:
@@ -65,12 +66,36 @@ spec:
       - name: data
         persistentVolumeClaim:
           claimName: filebrowser-data
+%EXTRAVOL%
 `
+
+// sidecar 是第二個容器，掛第二個 PVC；用來測 manifest 拿掉容器與 PVC 的情況。
+const sidecar = `      - name: sidecar
+        image: quay.io/flysangel/fbs:base-v1.0.3
+        volumeMounts:
+        - name: extra
+          mountPath: /extra`
+
+const extraVol = `      - name: extra
+        persistentVolumeClaim:
+          claimName: filebrowser-extra`
 
 // bundle 翻譯測試用的 filebrowser。conf 是 ConfigMap 的 data 區塊（每行縮兩格）。
 func bundle(t *testing.T, pass, conf string) *quadlet.Bundle {
 	t.Helper()
-	y := strings.ReplaceAll(manifest, "%PASS%", base64.StdEncoding.EncodeToString([]byte(pass)))
+	return bundleWith(t, pass, conf, false)
+}
+
+// bundleWith 的 withSidecar 為 true 時，多一個 sidecar 容器與 filebrowser-extra 卷。
+func bundleWith(t *testing.T, pass, conf string, withSidecar bool) *quadlet.Bundle {
+	t.Helper()
+	sc, ev := "", ""
+	if withSidecar {
+		sc, ev = sidecar, extraVol
+	}
+	y := strings.ReplaceAll(manifest, "%SIDECAR%", sc)
+	y = strings.ReplaceAll(y, "%EXTRAVOL%", ev)
+	y = strings.ReplaceAll(y, "%PASS%", base64.StdEncoding.EncodeToString([]byte(pass)))
 	y = strings.ReplaceAll(y, "%CONF%", conf)
 	d, err := render.Docs([]byte(y))
 	if err != nil {
@@ -96,6 +121,7 @@ func newFake() *run.Fake {
 	f.On("systemctl is-active", "inactive", 3)
 	f.On("podman pod exists", "", 1)
 	f.On("podman volume exists", "", 1)
+	f.On("podman secret exists", "", 1)
 	f.On("git", "", 128)
 	return f
 }
@@ -280,7 +306,7 @@ func TestApplyRestartsOnSecretChange(t *testing.T) {
 	if !h.fake.Called("systemctl start filebrowser-pod.service") {
 		t.Errorf("pod 服務沒變，應 start：%v", h.fake.Lines())
 	}
-	hash, err := os.ReadFile(filepath.Join(h.dirs[2], "filebrowser", "secrets.sha256"))
+	hash, err := os.ReadFile(filepath.Join(h.dirs[2], "filebrowser", "deployed.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,4 +488,160 @@ func TestDeleteRemovesEverything(t *testing.T) {
 	if i != len(want) {
 		t.Errorf("呼叫順序應含 %v，實際：%v", want, lines)
 	}
+}
+
+func TestApplyRetriesRestartAfterFailure(t *testing.T) {
+	h := newHarness(t)
+	if err := Apply(ctx(), h.env, bundle(t, "pass", conf1)); err != nil {
+		t.Fatal(err)
+	}
+	h.reset()
+	h.fake.On("systemctl restart", "", 1)
+	if err := Apply(ctx(), h.env, bundle(t, "pass2", conf1)); err == nil {
+		t.Fatal("restart 失敗時 apply 應回錯")
+	}
+	h.reset()
+	if err := Apply(ctx(), h.env, bundle(t, "pass2", conf1)); err != nil {
+		t.Fatal(err)
+	}
+	if !h.fake.Called("systemctl restart filebrowser-filebrowser.service") {
+		t.Errorf("上次 restart 失敗，這次應再 restart：%v", h.fake.Lines())
+	}
+}
+
+func TestApplyRemovesDroppedContainer(t *testing.T) {
+	h := newHarness(t)
+	if err := Apply(ctx(), h.env, bundleWith(t, "pass", conf1, true)); err != nil {
+		t.Fatal(err)
+	}
+	unit := filepath.Join(h.dirs[0], "filebrowser-sidecar.container")
+	if _, err := os.Stat(unit); err != nil {
+		t.Fatalf("第一次 apply 應寫出 sidecar：%v", err)
+	}
+	h.reset()
+	if err := Apply(ctx(), h.env, bundle(t, "pass", conf1)); err != nil {
+		t.Fatal(err)
+	}
+	if !h.fake.Called("systemctl stop filebrowser-sidecar.service") {
+		t.Errorf("manifest 拿掉的容器應停掉：%v", h.fake.Lines())
+	}
+	if _, err := os.Stat(unit); err == nil {
+		t.Errorf("manifest 拿掉的容器單元檔應刪掉")
+	}
+	if h.fake.Called("podman volume rm") {
+		t.Errorf("apply 不應刪卷：%v", h.fake.Lines())
+	}
+	rec, _ := os.ReadFile(filepath.Join(h.dirs[2], "filebrowser", "deployed.json"))
+	if !bytes.Contains(rec, []byte("filebrowser-extra")) {
+		t.Errorf("拿掉的卷應留在紀錄裡，delete 才刪得到：%s", rec)
+	}
+}
+
+func TestApplyFailsWhenDroppedContainerKeepsRunning(t *testing.T) {
+	h := newHarness(t)
+	if err := Apply(ctx(), h.env, bundleWith(t, "pass", conf1, true)); err != nil {
+		t.Fatal(err)
+	}
+	h.reset()
+	h.fake.On("systemctl stop", "", 1)
+	h.fake.On("systemctl is-active --quiet filebrowser-sidecar.service", "", 0)
+	if err := Apply(ctx(), h.env, bundle(t, "pass", conf1)); err == nil {
+		t.Fatal("拿掉的容器停不掉時應回錯")
+	}
+	if _, err := os.Stat(filepath.Join(h.dirs[0], "filebrowser-sidecar.container")); err != nil {
+		t.Errorf("停不掉時不應刪單元檔：%v", err)
+	}
+}
+
+func TestDeleteCoversVolumesFromEarlierApply(t *testing.T) {
+	h := newHarness(t)
+	if err := Apply(ctx(), h.env, bundleWith(t, "pass", conf1, true)); err != nil {
+		t.Fatal(err)
+	}
+	h.reset()
+	b := bundle(t, "pass", conf1)
+	if err := Apply(ctx(), h.env, b); err != nil {
+		t.Fatal(err)
+	}
+	h.reset()
+	if err := Delete(ctx(), h.env, b); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"filebrowser-data", "filebrowser-extra"} {
+		if !h.fake.Called("podman volume rm "+v) || !h.fake.Called("podman volume exists "+v) {
+			t.Errorf("卷 %s 應 rm 並確認：%v", v, h.fake.Lines())
+		}
+	}
+}
+
+func TestDeleteCoversUnitsFromEarlierApply(t *testing.T) {
+	// 上次 apply 有 sidecar，這次 delete 用的 Bundle 沒有：單元檔與卷都要清。
+	h := newHarness(t)
+	if err := Apply(ctx(), h.env, bundleWith(t, "pass", conf1, true)); err != nil {
+		t.Fatal(err)
+	}
+	h.reset()
+	if err := Delete(ctx(), h.env, bundle(t, "pass", conf1)); err != nil {
+		t.Fatal(err)
+	}
+	if !h.fake.Called("systemctl stop") || !strings.Contains(strings.Join(h.fake.Lines(), "\n"), "filebrowser-sidecar.service") {
+		t.Errorf("紀錄裡的 sidecar 應一起停：%v", h.fake.Lines())
+	}
+	for _, p := range []string{
+		filepath.Join(h.dirs[0], "filebrowser-sidecar.container"),
+		filepath.Join(h.dirs[0], "filebrowser-extra.volume"),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("%s 應刪掉", p)
+		}
+	}
+	if !h.fake.Called("podman volume rm filebrowser-extra") {
+		t.Errorf("紀錄裡的卷應刪：%v", h.fake.Lines())
+	}
+}
+
+func TestDeleteRefusesWhenUnitKeepsRunning(t *testing.T) {
+	h := newHarness(t)
+	b := bundle(t, "pass", conf1)
+	if err := Apply(ctx(), h.env, b); err != nil {
+		t.Fatal(err)
+	}
+	h.reset()
+	h.fake.On("systemctl stop", "", 1)
+	h.fake.On("systemctl is-active", "active", 0)
+	if err := Delete(ctx(), h.env, b); err == nil {
+		t.Fatal("單元停不掉時應回錯")
+	}
+	if _, err := os.Stat(filepath.Join(h.dirs[0], "filebrowser-filebrowser.container")); err != nil {
+		t.Errorf("停不掉時不應刪單元檔：%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(h.dirs[2], "filebrowser", "deployed.json")); err != nil {
+		t.Errorf("停不掉時不應刪紀錄：%v", err)
+	}
+	if h.fake.Called("podman secret rm") || h.fake.Called("podman volume rm") {
+		t.Errorf("停不掉時不應刪 secret 或卷：%v", h.fake.Lines())
+	}
+}
+
+func TestDeleteReportsRemainingSecret(t *testing.T) {
+	h := newHarness(t)
+	h.fake.On("podman secret exists filebrowser_fb_PASS", "", 0)
+	err := Delete(ctx(), h.env, bundle(t, "pass", conf1))
+	if err == nil || !strings.Contains(err.Error(), "filebrowser_fb_PASS") {
+		t.Fatalf("secret 還在時應回錯並列出名字：%v", err)
+	}
+}
+
+func TestExistsQueryErrorIsNotFalse(t *testing.T) {
+	h := newHarness(t)
+	h.fake.On("podman volume exists filebrowser-data", "", 125)
+	if err := Delete(ctx(), h.env, bundle(t, "pass", conf1)); err == nil {
+		t.Error("podman volume exists 回 125 時 delete 應回錯，不能當成卷不在")
+	}
+	h = newHarness(t)
+	h.fake.On("podman pod exists", "", 125)
+	if err := Apply(ctx(), h.env, bundle(t, "pass", conf1)); err == nil {
+		t.Error("podman pod exists 回 125 時 apply 應回錯，不能當成 pod 不在")
+	}
+	assertNothingWritten(t, h)
 }

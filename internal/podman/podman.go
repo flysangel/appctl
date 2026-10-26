@@ -7,13 +7,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -24,11 +27,91 @@ import (
 	"github.com/flysangel/appctl/internal/run"
 )
 
-// StateDir/<svc>/ 底下的狀態檔。
-const (
-	unitsFile   = "units"          // 這次部署的 systemd 服務名，一行一個，照停止順序（容器在前、pod 服務最後）
-	secretsFile = "secrets.sha256" // podman secret 名與值的 sha256，用來判斷 secret 有沒有變
-)
+// recordFile 是 StateDir/<svc>/ 底下的部署紀錄（JSON，權限 0600）：
+//
+//	{
+//	  "services": ["<svc>-<容器>.service", ..., "<svc>-pod.service"], // 停止順序：容器在前、pod 服務最後
+//	  "units":    {"<單元檔絕對路徑>": "<已生效內容的 sha256>"},
+//	  "configs":  {"<ConfigMap 名>": "<已生效內容的 sha256>"},
+//	  "secrets":  {"<podman secret 名>": "<已生效值的 sha256>"},
+//	  "volumes":  ["<卷名>", ...]                                     // 寫過的卷名只增不減，delete 才清
+//	}
+//
+// apply 寫檔前先存一份「舊紀錄加這次 Bundle」的聯集，新出現的項目 hash 是空字串（還沒生效）；
+// start/restart 全部成功後，才把 hash 換成這次的值。中途失敗時，下一次 apply 仍看得到「有變」而 restart，
+// delete 也拿得到中途寫出的單元、secret 與卷。
+const recordFile = "deployed.json"
+
+type record struct {
+	Services []string          `json:"services"`
+	Units    map[string]string `json:"units"`
+	Configs  map[string]string `json:"configs"`
+	Secrets  map[string]string `json:"secrets"`
+	Volumes  []string          `json:"volumes"`
+}
+
+func readRecord(env Env, svc string) (*record, error) {
+	r := &record{}
+	b, err := os.ReadFile(filepath.Join(env.svcState(svc), recordFile))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	if err == nil {
+		if err := json.Unmarshal(b, r); err != nil {
+			return nil, fmt.Errorf("部署紀錄壞了（%s）：%w", filepath.Join(env.svcState(svc), recordFile), err)
+		}
+	}
+	if r.Units == nil {
+		r.Units = map[string]string{}
+	}
+	if r.Configs == nil {
+		r.Configs = map[string]string{}
+	}
+	if r.Secrets == nil {
+		r.Secrets = map[string]string{}
+	}
+	return r, nil
+}
+
+func writeRecord(env Env, svc string, r *record) error {
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := env.svcState(svc)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, recordFile), append(b, '\n'), 0o600)
+}
+
+func sum(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+// union 回傳 a 加上 b 裡 a 沒有的項目，順序保留。
+func union(a, b []string) []string {
+	out := append([]string(nil), a...)
+	for _, x := range b {
+		if !slices.Contains(out, x) {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// stopOrder 把服務名排成停止順序：容器在前，pod 服務最後。
+func stopOrder(svc string, names []string) []string {
+	pod := svc + "-pod.service"
+	var out []string
+	for _, n := range names {
+		if n != pod && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return append(out, pod)
+}
 
 // Env 是部署時的外部環境。測試把目錄指到 t.TempDir()，Runner 換成 run.Fake。
 type Env struct {
@@ -73,9 +156,22 @@ func (e Env) run(ctx context.Context, name string, args ...string) error {
 	return err
 }
 
-// ok 跑一條「查詢」指令：結束碼 0 回 true，其他結束碼回 false；指令根本跑不起來時回錯。
-func (e Env) ok(ctx context.Context, name string, args ...string) (bool, error) {
+// exists 跑一條 podman … exists 查詢：結束碼 0 回 true，1 回 false；
+// 其他結束碼（例如 125 是 podman 自己出錯）與跑不起來都回錯，不能當成「不存在」。
+func (e Env) exists(ctx context.Context, name string, args ...string) (bool, error) {
 	err := e.run(ctx, name, args...)
+	if err == nil {
+		return true, nil
+	}
+	if code, isExit := run.ExitCode(err); isExit && code == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+// active 回傳 systemd 服務是不是 active。is-active 對 inactive、failed、沒載入都回非零，一律算不在執行。
+func (e Env) active(ctx context.Context, unit string) (bool, error) {
+	err := e.run(ctx, "systemctl", "is-active", "--quiet", unit)
 	if err == nil {
 		return true, nil
 	}
@@ -85,10 +181,43 @@ func (e Env) ok(ctx context.Context, name string, args ...string) (bool, error) 
 	return false, err
 }
 
-// quiet 跑一條允許失敗的指令（例如刪除不存在的 secret）：非零結束碼吸收，跑不起來才回錯。
+// quiet 跑一條允許失敗的刪除指令：非零結束碼吸收，跑不起來才回錯。刪完要另外用 exists 確認。
 func (e Env) quiet(ctx context.Context, name string, args ...string) error {
-	_, err := e.ok(ctx, name, args...)
+	err := e.run(ctx, name, args...)
+	if _, isExit := run.ExitCode(err); isExit {
+		return nil
+	}
 	return err
+}
+
+// stopUnits 停掉服務。systemctl stop 失敗時（例如單元沒載入），逐一查 is-active：
+// 全部都不在執行就繼續，還有在執行的就回錯，呼叫端不能接著刪檔。
+func stopUnits(ctx context.Context, env Env, units []string) error {
+	if len(units) == 0 {
+		return nil
+	}
+	err := env.run(ctx, "systemctl", append([]string{"stop"}, units...)...)
+	if err == nil {
+		return nil
+	}
+	if _, isExit := run.ExitCode(err); !isExit {
+		return err
+	}
+	var still []string
+	for _, u := range units {
+		up, aerr := env.active(ctx, u)
+		if aerr != nil {
+			return aerr
+		}
+		if up {
+			still = append(still, u)
+		}
+	}
+	if len(still) > 0 {
+		return fmt.Errorf("停不掉 %s，沒有刪任何東西：%w", strings.Join(still, "、"), err)
+	}
+	fmt.Fprintf(env.Out, "Info: systemctl stop 有錯，但單元都已不在執行，繼續：%v\n", err)
+	return nil
 }
 
 func (e Env) svcState(svc string) string { return filepath.Join(e.StateDir, svc) }
@@ -141,15 +270,15 @@ func isVolume(f quadlet.File) bool    { return strings.HasSuffix(f.Name, ".volum
 //     <svc>-pod.service 是 active 時算我們的（允許再 apply），不是 active 時算舊的。
 func checkLegacy(ctx context.Context, env Env, svc string) error {
 	var legacy []string
-	if yes, err := env.ok(ctx, "podman", "pod", "exists", svc+"-pod"); err != nil {
+	if yes, err := env.exists(ctx, "podman", "pod", "exists", svc+"-pod"); err != nil {
 		return err
 	} else if yes {
 		legacy = append(legacy, svc+"-pod")
 	}
-	if yes, err := env.ok(ctx, "podman", "pod", "exists", svc); err != nil {
+	if yes, err := env.exists(ctx, "podman", "pod", "exists", svc); err != nil {
 		return err
 	} else if yes {
-		active, err := env.ok(ctx, "systemctl", "is-active", "--quiet", svc+"-pod.service")
+		active, err := env.active(ctx, svc+"-pod.service")
 		if err != nil {
 			return err
 		}
@@ -168,20 +297,21 @@ func checkLegacy(ctx context.Context, env Env, svc string) error {
 		strings.Join(legacy, "、"), strings.Join(cmds, "\n  "))
 }
 
-// writeIfChanged 在內容不同或檔案不存在時寫檔，回傳有沒有寫。
-func writeIfChanged(p string, content []byte, perm fs.FileMode) (bool, error) {
+// writeIfChanged 在內容不同或檔案不存在時寫檔。
+func writeIfChanged(p string, content []byte, perm fs.FileMode) error {
 	old, err := os.ReadFile(p)
 	if err == nil && bytes.Equal(old, content) {
-		return false, nil
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return false, err
+		return err
 	}
-	return true, os.WriteFile(p, content, perm)
+	return os.WriteFile(p, content, perm)
 }
 
 // Apply 寫單元、ConfigFiles 與 secret，daemon-reload，再啟動服務。
-// 自己的檔或它用到的卷、ConfigMap、secret 有變的單元 restart，其餘 start（冪等）。
+// 「有變」是和部署紀錄裡已生效的 hash 比：自己的檔或它用到的卷、ConfigMap、secret 有變的單元 restart，
+// 其餘 start（冪等）。上次部署有、這次 Bundle 沒有的單元先停掉再刪檔；卷不刪，留在紀錄裡給 delete。
 func Apply(ctx context.Context, env Env, b *quadlet.Bundle) error {
 	if err := checkRoot(env, "apply"); err != nil {
 		return err
@@ -192,31 +322,98 @@ func Apply(ctx context.Context, env Env, b *quadlet.Bundle) error {
 	}
 	demoNotice(ctx, env, b)
 
-	// tokens 是「有變的依賴」在容器單元裡的寫法；單元內容含任一個就要 restart。
-	var tokens []string
-	changed := map[string]bool{}
+	old, err := readRecord(env, svc)
+	if err != nil {
+		return err
+	}
+	paths := map[string]string{} // 單元檔名 → 主機路徑
 	for _, u := range b.Units {
 		p, err := env.unitPath(u)
 		if err != nil {
 			return err
 		}
-		ch, err := writeIfChanged(p, u.Content, 0o644)
-		if err != nil {
+		paths[u.Name] = p
+	}
+	var services []string
+	for _, u := range b.Units {
+		if !isVolume(u) {
+			services = append(services, serviceName(u.Name))
+		}
+	}
+	services = stopOrder(svc, services)
+
+	// 先存聯集紀錄：中途失敗時 delete 也找得到這次寫出的東西。
+	pre := &record{
+		Services: stopOrder(svc, union(old.Services, services)),
+		Units:    maps.Clone(old.Units),
+		Configs:  old.Configs,
+		Secrets:  maps.Clone(old.Secrets),
+		Volumes:  union(old.Volumes, b.Volumes),
+	}
+	for _, p := range paths {
+		if !hasKey(pre.Units, p) {
+			pre.Units[p] = ""
+		}
+	}
+	for _, s := range b.Secrets {
+		for key := range s.Data {
+			if n := quadlet.PodmanSecretName(svc, s.Name, key); !hasKey(pre.Secrets, n) {
+				pre.Secrets[n] = ""
+			}
+		}
+	}
+	if err := writeRecord(env, svc, pre); err != nil {
+		return err
+	}
+
+	// 上次有、這次沒有的單元：停掉再刪檔。
+	current := map[string]bool{}
+	for _, p := range paths {
+		current[p] = true
+	}
+	var stale []string
+	for p := range old.Units {
+		if !current[p] {
+			stale = append(stale, p)
+		}
+	}
+	sort.Strings(stale)
+	var staleSvcs []string
+	for _, p := range stale {
+		if !strings.HasSuffix(p, ".volume") {
+			staleSvcs = append(staleSvcs, serviceName(filepath.Base(p)))
+		}
+	}
+	if err := stopUnits(ctx, env, staleSvcs); err != nil {
+		return err
+	}
+	for _, p := range stale {
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
-		if ch {
+	}
+
+	// tokens 是「有變的依賴」在容器單元裡的寫法；單元內容含任一個就要 restart。
+	var tokens []string
+	changed := map[string]bool{}
+	for _, u := range b.Units {
+		p := paths[u.Name]
+		if err := writeIfChanged(p, u.Content, 0o644); err != nil {
+			return err
+		}
+		if old.Units[p] != sum(u.Content) {
 			changed[u.Name] = true
 			if isVolume(u) {
 				tokens = append(tokens, "Volume="+quadlet.Escape(u.Name)+":")
 			}
 		}
 	}
-	cmTokens, err := syncConfig(env, b)
+	configs, cmTokens, err := syncConfig(env, b, old.Configs)
 	if err != nil {
 		return err
 	}
 	tokens = append(tokens, cmTokens...)
-	secTokens, err := syncSecrets(ctx, env, b)
+	secrets, secTokens, err := syncSecrets(ctx, env, b, old.Secrets)
 	if err != nil {
 		return err
 	}
@@ -227,25 +424,22 @@ func Apply(ctx context.Context, env Env, b *quadlet.Bundle) error {
 	}
 
 	podFile := svc + "-pod.service"
-	var restart, start, stopOrder []string
+	var restart, start []string
 	for _, u := range b.Units {
 		if isVolume(u) {
 			continue // 卷服務由容器單元的依賴拉起來
 		}
-		name := serviceName(u.Name)
 		need := changed[u.Name]
 		if isContainer(u) {
-			stopOrder = append(stopOrder, name)
 			// pod 重建時，pod 裡的容器會被一起移除，所以也要 restart。
 			need = need || changed[podFile] || containsAny(u.Content, tokens)
 		}
 		if need {
-			restart = append(restart, name)
+			restart = append(restart, serviceName(u.Name))
 		} else {
-			start = append(start, name)
+			start = append(start, serviceName(u.Name))
 		}
 	}
-	stopOrder = append(stopOrder, podFile)
 	if len(restart) > 0 {
 		if err := env.run(ctx, "systemctl", append([]string{"restart"}, restart...)...); err != nil {
 			return err
@@ -256,8 +450,17 @@ func Apply(ctx context.Context, env Env, b *quadlet.Bundle) error {
 			return err
 		}
 	}
-	_, err = writeIfChanged(filepath.Join(env.svcState(svc), unitsFile), []byte(strings.Join(stopOrder, "\n")+"\n"), 0o644)
-	return err
+
+	done := &record{Services: services, Units: map[string]string{}, Configs: configs, Secrets: secrets, Volumes: pre.Volumes}
+	for _, u := range b.Units {
+		done.Units[paths[u.Name]] = sum(u.Content)
+	}
+	return writeRecord(env, svc, done)
+}
+
+func hasKey(m map[string]string, k string) bool {
+	_, ok := m[k]
+	return ok
 }
 
 func containsAny(content []byte, tokens []string) bool {
@@ -269,20 +472,31 @@ func containsAny(content []byte, tokens []string) bool {
 	return false
 }
 
-// syncConfig 讓 StateDir/<svc>/configmap/ 和 Bundle.ConfigFiles 一致，回傳有變的 ConfigMap 在單元裡的寫法。
-// 只動有變的 ConfigMap 目錄：容器 bind mount 的是目錄，整個刪掉重建會讓沒 restart 的容器看到已刪除的目錄。
-func syncConfig(env Env, b *quadlet.Bundle) ([]string, error) {
+// configSum 是一個 ConfigMap 全部鍵與內容的 hash。
+func configSum(files map[string][]byte) string {
+	h := sha256.New()
+	for _, k := range sortedKeys(files) {
+		fmt.Fprintf(h, "%d:%s%d:", len(k), k, len(files[k]))
+		h.Write(files[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// syncConfig 讓 StateDir/<svc>/configmap/ 和 Bundle.ConfigFiles 一致。
+// 回傳這次每個 ConfigMap 的 hash，以及和已生效 hash 不同的 ConfigMap 在單元裡的寫法。
+// 只重建磁碟上內容不同的目錄：容器 bind mount 的是目錄，整個刪掉重建會讓沒 restart 的容器看到已刪除的目錄。
+func syncConfig(env Env, b *quadlet.Bundle, deployed map[string]string) (map[string]string, []string, error) {
 	base := filepath.Join(env.svcState(b.Service), "configmap")
 	want := map[string]map[string][]byte{} // ConfigMap 名 → 鍵 → 內容
 	for _, f := range b.ConfigFiles {
 		p, err := env.configPath(f.Name)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		rel, err := filepath.Rel(base, p)
 		cm, key, ok := strings.Cut(filepath.ToSlash(rel), "/")
 		if err != nil || !ok || cm == ".." || strings.Contains(key, "/") {
-			return nil, fmt.Errorf("ConfigFile 路徑不是 %s/<ConfigMap>/<鍵>：%s", base, f.Name)
+			return nil, nil, fmt.Errorf("ConfigFile 路徑不是 %s/<ConfigMap>/<鍵>：%s", base, f.Name)
 		}
 		if want[cm] == nil {
 			want[cm] = map[string][]byte{}
@@ -292,50 +506,54 @@ func syncConfig(env Env, b *quadlet.Bundle) ([]string, error) {
 	have := map[string]map[string][]byte{}
 	entries, err := os.ReadDir(base)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, d := range entries {
 		files, err := os.ReadDir(filepath.Join(base, d.Name()))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		have[d.Name()] = map[string][]byte{}
 		for _, f := range files {
 			c, err := os.ReadFile(filepath.Join(base, d.Name(), f.Name()))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			have[d.Name()][f.Name()] = c
 		}
 	}
-	var tokens []string
 	for cm := range have {
 		if _, ok := want[cm]; !ok {
 			if err := os.RemoveAll(filepath.Join(base, cm)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
+	sums := map[string]string{}
+	var tokens []string
 	for _, cm := range sortedKeys(want) {
+		sums[cm] = configSum(want[cm])
+		if deployed[cm] != sums[cm] {
+			host := quadlet.Escape(quadlet.ConfigDir(b.Service, cm))
+			tokens = append(tokens, "Volume="+host+":", "Volume="+host+"/")
+		}
 		if sameFiles(have[cm], want[cm]) {
 			continue
 		}
 		dir := filepath.Join(base, cm)
 		if err := os.RemoveAll(dir); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for key, c := range want[cm] {
 			if err := os.WriteFile(filepath.Join(dir, key), c, 0o644); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
-		host := quadlet.Escape(quadlet.ConfigDir(b.Service, cm))
-		tokens = append(tokens, "Volume="+host+":", "Volume="+host+"/")
 	}
-	return tokens, nil
+	return sums, tokens, nil
 }
 
 func sameFiles(a, b map[string][]byte) bool {
@@ -359,65 +577,35 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// readSecretHashes 讀 secrets.sha256，回傳 podman secret 名 → sha256。檔案不在時回空 map。
-func readSecretHashes(p string) (map[string]string, error) {
-	out := map[string]string{}
-	b, err := os.ReadFile(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return out, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		if name, sum, ok := strings.Cut(line, " "); ok {
-			out[name] = sum
-		}
-	}
-	return out, nil
-}
-
 // syncSecrets 每次都先 rm 再 create（podman 4.9.3 的 create --replace 在 secret 不存在時會失敗），
-// 值走 stdin。值有沒有變，比對 secrets.sha256，不從 podman 讀回機密。回傳有變的 secret 在單元裡的寫法。
-func syncSecrets(ctx context.Context, env Env, b *quadlet.Bundle) ([]string, error) {
-	hashPath := filepath.Join(env.svcState(b.Service), secretsFile)
-	old, err := readSecretHashes(hashPath)
-	if err != nil {
-		return nil, err
-	}
+// 值走 stdin。值有沒有變，比對部署紀錄裡已生效的 hash，不從 podman 讀回機密。
+// 紀錄裡有、這次沒有的 secret 一起刪。回傳這次的 hash 與有變的 secret 在單元裡的寫法。
+func syncSecrets(ctx context.Context, env Env, b *quadlet.Bundle, deployed map[string]string) (map[string]string, []string, error) {
 	now := map[string]string{}
 	var tokens []string
 	for _, s := range b.Secrets {
 		for _, key := range sortedKeys(s.Data) {
 			name := quadlet.PodmanSecretName(b.Service, s.Name, key)
 			if err := env.quiet(ctx, "podman", "secret", "rm", name); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if _, err := env.Runner.Run(ctx, "podman", []string{"secret", "create", name, "-"}, s.Data[key]); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			sum := sha256.Sum256(s.Data[key])
-			now[name] = hex.EncodeToString(sum[:])
-			if old[name] != now[name] {
+			now[name] = sum(s.Data[key])
+			if deployed[name] != now[name] {
 				tokens = append(tokens, "Secret="+quadlet.Escape(name)+",")
 			}
 		}
 	}
-	for _, name := range sortedKeys(old) {
+	for _, name := range sortedKeys(deployed) {
 		if _, ok := now[name]; !ok {
 			if err := env.quiet(ctx, "podman", "secret", "rm", name); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 	}
-	var buf strings.Builder
-	for _, name := range sortedKeys(now) {
-		fmt.Fprintf(&buf, "%s %s\n", name, now[name])
-	}
-	if err := os.MkdirAll(filepath.Dir(hashPath), 0o755); err != nil {
-		return nil, err
-	}
-	return tokens, os.WriteFile(hashPath, []byte(buf.String()), 0o600)
+	return now, tokens, nil
 }
 
 // demoNotice 對這次渲染用到的機密檔（secret/kustomization.yaml 的 secretGenerator 列的 envs 與 files），
@@ -466,35 +654,22 @@ func demoNotice(ctx context.Context, env Env, b *quadlet.Bundle) {
 	}
 }
 
-// readUnits 讀上次 apply 記下的服務名（停止順序）。沒有紀錄時回 nil。
-func readUnits(env Env, svc string) ([]string, error) {
-	b, err := os.ReadFile(filepath.Join(env.svcState(svc), unitsFile))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return strings.Fields(string(b)), nil
-}
-
 // Stop 停掉容器單元與 pod 服務，不刪卷。沒有部署紀錄時只停 pod 服務：
 // 容器單元 Requires= pod 服務，systemd 會一起停。
 func Stop(ctx context.Context, env Env, svc string) error {
 	if err := checkRoot(env, "stop"); err != nil {
 		return err
 	}
-	units, err := readUnits(env, svc)
+	rec, err := readRecord(env, svc)
 	if err != nil {
 		return err
 	}
-	if len(units) == 0 {
-		units = []string{svc + "-pod.service"}
-	}
-	return env.run(ctx, "systemctl", append([]string{"stop"}, units...)...)
+	return env.run(ctx, "systemctl", append([]string{"stop"}, stopOrder(svc, rec.Services)...)...)
 }
 
-// Delete 確認後停單元，刪單元、ConfigFiles、secret 與狀態檔，daemon-reload，再刪卷並確認卷已不在。
+// Delete 確認後，對這次 Bundle 與部署紀錄的聯集：停單元，刪單元檔與 secret，daemon-reload，
+// 刪卷，並確認 secret 與卷都已不在。全部確認乾淨後才刪 StateDir/<svc>（含 ConfigFiles 與紀錄）；
+// 中途回錯時紀錄留著，修好後再跑一次 delete 就能接著清。
 func Delete(ctx context.Context, env Env, b *quadlet.Bundle) error {
 	if err := checkRoot(env, "delete"); err != nil {
 		return err
@@ -511,92 +686,79 @@ func Delete(ctx context.Context, env Env, b *quadlet.Bundle) error {
 	if err := ask(env.Stdin, env.Out, svc, track); err != nil {
 		return err
 	}
-
-	// 停止順序：容器在前、pod 服務最後；再補上次部署紀錄裡有、這次 Bundle 沒有的單元。
-	var units []string
-	seen := map[string]bool{}
-	add := func(n string) {
-		if !seen[n] {
-			seen[n] = true
-			units = append(units, n)
-		}
-	}
-	for _, u := range b.Units {
-		if isContainer(u) {
-			add(serviceName(u.Name))
-		}
-	}
-	add(svc + "-pod.service")
-	recorded, err := readUnits(env, svc)
+	rec, err := readRecord(env, svc)
 	if err != nil {
 		return err
 	}
-	for _, n := range recorded {
-		add(n)
-	}
-	// 單元沒載入（從沒部署過）時 systemctl stop 會失敗，不擋刪除。
-	if err := env.run(ctx, "systemctl", append([]string{"stop"}, units...)...); err != nil {
-		if _, isExit := run.ExitCode(err); !isExit {
-			return err
-		}
-		fmt.Fprintln(env.Out, "Info: 停止單元時有錯，繼續刪除：", err)
-	}
 
+	var services []string
+	unitPaths := sortedKeys(rec.Units)
 	for _, u := range b.Units {
+		if isContainer(u) {
+			services = append(services, serviceName(u.Name))
+		}
 		p, err := env.unitPath(u)
 		if err != nil {
 			return err
 		}
+		unitPaths = union(unitPaths, []string{p})
+	}
+	services = stopOrder(svc, union(services, rec.Services))
+	if err := stopUnits(ctx, env, services); err != nil {
+		return err
+	}
+	for _, p := range unitPaths {
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
-	hashes, err := readSecretHashes(filepath.Join(env.svcState(svc), secretsFile))
-	if err != nil {
-		return err
-	}
-	secrets := map[string]bool{}
-	for name := range hashes {
-		secrets[name] = true
-	}
+
+	secrets := sortedKeys(rec.Secrets)
 	for _, s := range b.Secrets {
-		for key := range s.Data {
-			secrets[quadlet.PodmanSecretName(svc, s.Name, key)] = true
+		for _, key := range sortedKeys(s.Data) {
+			secrets = union(secrets, []string{quadlet.PodmanSecretName(svc, s.Name, key)})
 		}
 	}
-	for _, name := range sortedKeys(secrets) {
+	for _, name := range secrets {
 		if err := env.quiet(ctx, "podman", "secret", "rm", name); err != nil {
 			return err
 		}
 	}
-	if err := os.RemoveAll(env.svcState(svc)); err != nil {
+	if err := leftovers(ctx, env, "secret", secrets); err != nil {
 		return err
 	}
 	if err := env.run(ctx, "systemctl", "daemon-reload"); err != nil {
 		return err
 	}
 
-	for _, v := range b.Volumes {
+	volumes := union(b.Volumes, rec.Volumes)
+	for _, v := range volumes {
 		if err := env.quiet(ctx, "podman", "volume", "rm", v); err != nil {
 			return err
 		}
 	}
-	var left []string
-	for _, v := range b.Volumes {
-		yes, err := env.ok(ctx, "podman", "volume", "exists", v)
+	if err := leftovers(ctx, env, "volume", volumes); err != nil {
+		return err
+	}
+	return os.RemoveAll(env.svcState(svc))
+}
+
+// leftovers 用 podman <kind> exists 逐一確認已刪除，還在的列出名字與手動指令。
+func leftovers(ctx context.Context, env Env, kind string, names []string) error {
+	var left, cmds []string
+	for _, n := range names {
+		yes, err := env.exists(ctx, "podman", kind, "exists", n)
 		if err != nil {
 			return err
 		}
 		if yes {
-			left = append(left, v)
+			left = append(left, n)
+			cmds = append(cmds, "sudo podman "+kind+" rm "+n)
 		}
 	}
-	if len(left) > 0 {
-		var cmds []string
-		for _, v := range left {
-			cmds = append(cmds, "sudo podman volume rm "+v)
-		}
-		return fmt.Errorf("這些卷還在：%s。手動刪除：\n  %s", strings.Join(left, "、"), strings.Join(cmds, "\n  "))
+	if len(left) == 0 {
+		return nil
 	}
-	return nil
+	label := map[string]string{"volume": "卷", "secret": "secret"}[kind]
+	return fmt.Errorf("這些%s還在：%s。手動刪除：\n  %s", label, strings.Join(left, "、"), strings.Join(cmds, "\n  "))
 }
