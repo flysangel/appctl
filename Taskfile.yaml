@@ -16,7 +16,7 @@ tasks:
 
   ops:
     cmds:
-      - task --list-all | grep -F "[維運]"
+      - echo '維運動作已改成 appctl 子命令，見 appctl 不帶參數的用法說明（task bootstrap 產生 bin/appctl）'
     silent: true
 
   doctor:
@@ -30,7 +30,7 @@ tasks:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
       - go run ./cmd/appctl check
-      - shellcheck -S error -x bin/svc.sh bin/doctor.sh bin/render-diff.sh install.sh
+      - shellcheck -S error -x bin/doctor.sh bin/render-diff.sh install.sh
       - shellcheck -S warning .githooks/pre-push
 
   bootstrap:
@@ -43,33 +43,3 @@ tasks:
     cmds:
       - go test ./...
       - python3 bin/run-tests.py
-
-  apply:
-    desc: "[維運] 部署服務（用法：task apply SVC=grafana TRACK=podman）"
-    summary: |
-      轉派至 bin/svc.sh。k8s 軌跑 kubectl apply -k；podman 軌把 kubectl kustomize 的輸出接給 sudo podman kube play --replace。
-      k8s 軌套用到當前 KUBECONFIG context 所指的叢集，namespace 由該軌 kustomization.yaml 的 namespace 欄決定。
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: '用法：task apply SVC=grafana TRACK=podman（未提供 SVC）'
-      - sh: "[ -n '{{.TRACK}}' ]"
-        msg: '用法：task apply SVC=grafana TRACK=podman（未提供 TRACK）'
-    cmds:
-      - bash bin/svc.sh '{{.SVC}}' apply '{{.TRACK}}'
-
-  delete:
-    # 確認由腳本負責：bin/svc.sh
-    desc: "[維運]【破壞性】拆除服務，k8s 連 PVC、podman 連卷（用法：task delete SVC=grafana TRACK=podman）"
-    summary: |
-      不可逆。執行前會要求輸入服務名確認；無 tty（cron／CI）時 read 失敗、腳本中止、什麼都不刪。
-      k8s 軌 kubectl delete 全部資源含 PVC（叢集 StorageClass reclaimPolicy 為 Delete，資料會連動刪除）。
-      StatefulSet 的 volumeClaimTemplates PVC 是 k8s 動態建立、不在 manifest 內，不隨 delete 移除；
-      腳本會列出這些 PVC 並提示手動清除的 kubectl delete 指令。
-      podman 軌 podman kube down --force，pod 與 named volume 一併移除。
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: '用法：task delete SVC=grafana TRACK=podman（未提供 SVC）'
-      - sh: "[ -n '{{.TRACK}}' ]"
-        msg: '用法：task delete SVC=grafana TRACK=podman（未提供 TRACK）'
-    cmds:
-      - bash bin/svc.sh '{{.SVC}}' delete '{{.TRACK}}'

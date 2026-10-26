@@ -53,8 +53,8 @@ if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import yaml' >/dev/null 2
 fi
 
 want skopeo 'appctl check-images'
-want podman 'podman 軌的 apply、delete'
-want sudo 'podman 軌的 apply、delete'
+want podman 'appctl 的 podman 軌（apply、delete）'
+want sudo 'appctl 的 podman 軌（apply、delete）'
 
 # local 或 worktree 作用域的 core.hooksPath 會讓 git 不經過帳號層派工 hook，機密掃描靜默失效
 scopes="$(git config --show-scope --get-all core.hooksPath || true)"

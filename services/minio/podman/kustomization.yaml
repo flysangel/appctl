@@ -11,7 +11,7 @@ resources:
 - ../secret
 patches:
 # 單節點：replicas 降為 1，args 改成單目錄，兩個 volumeClaimTemplates 併成 minio-data。
-# 卷名 minio-data 與舊 kube play 的卷同名，切換後資料會接回。
+# 卷名 minio-data 與舊 kube play 路徑的卷同名，切換後資料會接回。
 - target:
     kind: StatefulSet
     name: minio
