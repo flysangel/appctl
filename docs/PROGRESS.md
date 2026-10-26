@@ -16,8 +16,8 @@
 ## 2. 進行中
 
 - 分支 `appctl-quadlet`：控制面改成 Go 的 `appctl`，podman 軌從 `podman kube play` 改成 Quadlet。
-- 做到哪：實作、離線測試與四大文件都完成。
-- 下一步：先備份主工作樹 gitignored 的真值檔到 repo 外，再 merge 回 main。
+- 做到哪：15 個任務與最終審查的修正都完成。
+- 下一步：備份主工作樹 gitignored 的真值檔到 repo 外，再 merge 回 main、push main、看第一次 CI，然後發 rc 預發布版。
 
 ## 3. 待辦
 
@@ -33,16 +33,18 @@
 
 - podman 軌在這台主機跑 `apply`、`stop`、`delete`：先 filebrowser，再多容器服務與 minio；確認 `stop` 後重開機會回來、`delete` 後卷與 secret 都不在
 - `appctl smoke` 跑一輪 podman 軌的服務，貼出輸出
-- podman 換 secret 時，容器還在用的 secret 能不能先刪再建（`apply` 改了機密檔時）
+- podman 換 secret：rootless 4.9.3 已驗過容器還在引用時能先刪再建；還要驗 rootful，以及重啟後的容器讀到新值（`apply` 改了機密檔時）
 - `Tmpfs=`（`emptyDir` 加 `medium: Memory`）在 pod 內的行為，例如 `/dev/shm` 大小（有 podman 軌服務用到時）
 - `appctl quay init` 對真 quay 確認「已初始化」的回應形狀與 quay 版本（現在依文件寫成 HTTP 400 加 `non-empty database`）
-- `appctl ncb cert` 自簽：放進 `ncb-certbot` 卷後 nginx 起得來；ACME 要公網網域，等有網域時再驗
+- `appctl ncb cert` 自簽：放進 `ncb-certbot` 卷後 nginx 起得來；ACME 要公網網域，等有網域時再驗，包含自簽之後跑 ACME 會先把自簽目錄移到 `live/<網域>.selfsigned/`（未驗）
 - k8s 軌在 infra-k8s 的叢集跑 `apply`、`delete`，以及 gmm、quay 子命令的自動 port-forward（每次 `delete` 前確認該服務在叢集上沒有正式資料）
 - `appctl gmm seed` 對正式 gmm 跑兩次，確認第二次只覆寫、不新建（冪等）
 
 **正式服務切換：**
 
 - 正式服務從 `podman kube play` 切到 `appctl`：逐一 `sudo podman pod rm -f <pod>`（留卷），改好部署主機 clone 裡的真值檔，再 `sudo appctl apply`，確認 `VolumeName=` 接回舊資料；先拿一個有資料卷的服務試
+- 切換時一併刪掉 kube play 留下的舊 podman secret（用 `sudo podman secret ls` 列出）（切換每個服務時）
+- merge 後沒有 `svc.sh`，切換前的舊 pod 直接用 `sudo podman pod` 管理（merge 後到切換完成前）
 
 **工程：**
 
@@ -52,6 +54,7 @@
 - quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`appctl apply` 回來時 quay 還沒就緒
 - grafana 的 admin 密碼納入 `secret/secret.env`（`GF_SECURITY_ADMIN_PASSWORD`），不再用上游預設 admin/admin。做完改 `README.md`〈grafana 的第一次登入〉
 - 決定 ncb 的 certbot 容器去留：`server_name` 是 `ncb.local`，ACME 不簽，自簽憑證沒有 renewal 設定檔，`renew` 迴圈等於沒做事。拿掉容器，或改成公網網域（公網 DNS 不在本 repo 範圍）。做完改 `docs/ARCHITECTURE.md`〈已知的結構性限制〉ncb 那條與 `README.md`〈ncb 的憑證〉
+- `appctl delete` 沒停 `<claim>-volume.service`，delete 後留下 active 的孤兒單元（下次改 `internal/podman` 的 delete 時）
 - `appctl delete` 不靠這次的渲染與翻譯：manifest 壞掉時現在刪不掉已部署的服務，改成只靠 `deployed.json` 也能刪
 - `appctl apply` 刪舊 podman secret 失敗時，錯誤被吸收而且從紀錄移除，真值留在主機上；改成留在紀錄或用 `podman secret exists` 確認
 - 翻譯器替 Secret 的每個鍵都建 podman secret，包含沒人引用的 `QUAY_SUPERUSER_*`；改成只建單元引用到的鍵
