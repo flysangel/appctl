@@ -19,6 +19,8 @@ const fakeBinary = "#!/bin/sh\necho fake-appctl\n"
 type fixture struct {
 	srv  *httptest.Server
 	dest string
+	// sumName 是 .sha256 內寫的檔名，預設 appctl-linux-amd64
+	sumName string
 
 	mu   sync.Mutex
 	hits []string
@@ -31,7 +33,7 @@ func newFixture(t *testing.T, sum string) *fixture {
 		h := sha256.Sum256([]byte(fakeBinary))
 		sum = hex.EncodeToString(h[:])
 	}
-	f := &fixture{dest: t.TempDir()}
+	f := &fixture{dest: t.TempDir(), sumName: "appctl-linux-amd64"}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.hits = append(f.hits, r.URL.Path)
@@ -40,7 +42,7 @@ func newFixture(t *testing.T, sum string) *fixture {
 		case strings.HasSuffix(r.URL.Path, "/appctl-linux-amd64"):
 			_, _ = w.Write([]byte(fakeBinary))
 		case strings.HasSuffix(r.URL.Path, "/appctl-linux-amd64.sha256"):
-			_, _ = w.Write([]byte(sum + "  appctl-linux-amd64\n"))
+			_, _ = w.Write([]byte(sum + "  " + f.sumName + "\n"))
 		default:
 			http.NotFound(w, r)
 		}
@@ -144,6 +146,18 @@ func TestInstallDownloadFails(t *testing.T) {
 	f.srv.Close()
 	if _, err := f.run(t); err == nil {
 		t.Fatal("伺服器不通卻成功")
+	}
+	if _, err := os.Stat(filepath.Join(f.dest, "appctl")); err == nil {
+		t.Fatal("不該寫入目的檔")
+	}
+}
+
+func TestInstallSumNamesOtherFile(t *testing.T) {
+	f := newFixture(t, "")
+	f.sumName = "other-file"
+	out, err := f.run(t)
+	if err == nil || !strings.Contains(out, "Error:") {
+		t.Fatalf(".sha256 指向別的檔卻成功：%v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(f.dest, "appctl")); err == nil {
 		t.Fatal("不該寫入目的檔")
