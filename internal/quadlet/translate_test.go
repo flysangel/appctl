@@ -507,6 +507,38 @@ func TestRejectsNilSetting(t *testing.T) {
 	}
 }
 
+// wantPorts 是每個有 podman 軌的服務該對外開的主機埠，格式同 podman 的 -p。
+var wantPorts = map[string][]string{
+	"filebrowser":  {"4000:4000/tcp"},
+	"gmm":          {"8080:8080/tcp"},
+	"grafana":      {"3000:3000/tcp"},
+	"iperf3":       {"5201:5201/tcp"},
+	"juicefs":      {"9005:9005/tcp"},
+	"minio":        {"9000:9000/tcp", "9001:9001/tcp"},
+	"ncb":          {"443:443/tcp", "80:80/tcp"},
+	"quay":         {"8080:8080/tcp"},
+	"static-nginx": {"80:80/tcp"},
+}
+
+// podPorts 取出 pod 服務 ExecStart 裡所有 -p 的值，排序後回傳。
+func podPorts(t *testing.T, b *quadlet.Bundle, svc string) []string {
+	t.Helper()
+	var got []string
+	for _, line := range strings.Split(unit(t, b, svc+"-pod.service"), "\n") {
+		if !strings.HasPrefix(line, "ExecStart=") {
+			continue
+		}
+		f := strings.Fields(line)
+		for i, w := range f {
+			if w == "-p" && i+1 < len(f) {
+				got = append(got, f[i+1])
+			}
+		}
+	}
+	sort.Strings(got)
+	return got
+}
+
 func TestTranslateAllServices(t *testing.T) {
 	root, err := repo.Root(".")
 	if err != nil {
@@ -542,6 +574,13 @@ func TestTranslateAllServices(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			want, ok := wantPorts[svc]
+			if !ok {
+				t.Fatalf("wantPorts 缺 %s，請補上預期的主機埠", svc)
+			}
+			if got := podPorts(t, b, svc); strings.Join(got, " ") != strings.Join(want, " ") {
+				t.Errorf("主機埠 = %v，預期 %v", got, want)
+			}
 			if svc != "minio" {
 				return
 			}
@@ -559,7 +598,7 @@ func TestTranslateAllServices(t *testing.T) {
 			}
 		})
 	}
-	if n < 9 {
-		t.Fatalf("只找到 %d 個有 podman 軌的服務", n)
+	if n != len(wantPorts) {
+		t.Fatalf("找到 %d 個有 podman 軌的服務，wantPorts 有 %d 個", n, len(wantPorts))
 	}
 }
