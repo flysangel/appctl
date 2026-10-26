@@ -3,9 +3,12 @@ package render
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 
+	yamlv3 "go.yaml.in/yaml/v3"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 	"sigs.k8s.io/yaml"
@@ -23,15 +26,25 @@ func Render(root, svc, track string) ([]byte, error) {
 }
 
 // Docs 把多文件 YAML 拆成多份文件，略過空文件。
+// 用 YAML 解析器切文件，內容裡以 --- 開頭的行（例如 PEM）不會被誤切。
 func Docs(b []byte) ([]map[string]any, error) {
 	var out []map[string]any
-	for _, part := range bytes.Split(b, []byte("\n---")) {
-		part = bytes.TrimPrefix(part, []byte("---"))
-		if len(bytes.TrimSpace(part)) == 0 {
-			continue
+	dec := yamlv3.NewDecoder(bytes.NewReader(b))
+	for {
+		var node yamlv3.Node
+		err := dec.Decode(&node)
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("解析 YAML 失敗：%w", err)
+		}
+		raw, err := yamlv3.Marshal(&node)
+		if err != nil {
+			return nil, fmt.Errorf("解析 YAML 失敗：%w", err)
 		}
 		var d map[string]any
-		if err := yaml.Unmarshal(part, &d); err != nil {
+		if err := yaml.Unmarshal(raw, &d); err != nil {
 			return nil, fmt.Errorf("解析 YAML 失敗：%w", err)
 		}
 		if len(d) == 0 {
@@ -39,5 +52,4 @@ func Docs(b []byte) ([]map[string]any, error) {
 		}
 		out = append(out, d)
 	}
-	return out, nil
 }
