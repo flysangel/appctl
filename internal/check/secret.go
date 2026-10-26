@@ -180,3 +180,30 @@ func splitDBURI(raw string) (user, pass, dbname opt) {
 	pass = opt{p, hasPass}
 	return
 }
+
+// Secrets 對每個有規則、且比對用的檔案都在的服務跑 Secret。
+// 檔案不在的服務略過：機密真值檔不一定在每台機器上。
+func Secrets(root string) []string {
+	var errs []string
+	names := make([]string, 0, len(secretRules))
+	for n := range secretRules {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, svc := range names {
+		secret := filepath.Join(root, "services", svc, "secret")
+		have := true
+		for _, f := range []string{"secret.env", "config.yaml"} {
+			if fi, err := os.Stat(filepath.Join(secret, f)); err != nil || !fi.Mode().IsRegular() {
+				have = false
+			}
+		}
+		if !have {
+			continue
+		}
+		for _, e := range Secret(root, svc) {
+			errs = append(errs, svc+"："+e)
+		}
+	}
+	return errs
+}

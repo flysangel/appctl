@@ -214,10 +214,15 @@ func runCheck(args []string) error {
 		printIndented(errs)
 		problems = append(problems, errs...)
 	}
+	if errs := check.Secrets(root); len(errs) > 0 {
+		fmt.Fprintln(os.Stderr, "Error: 機密一致性檢查未通過：")
+		printIndented(errs)
+		problems = append(problems, errs...)
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("靜態檢查未通過，共 %d 項", len(problems))
 	}
-	fmt.Println("Success: services/ 的 image 與服務層檢查都通過")
+	fmt.Println("Success: services/ 的 image、服務層與機密一致性檢查都通過")
 	return nil
 }
 

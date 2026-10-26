@@ -19,6 +19,7 @@ func (c Call) Line() string { return Line(c.Name, c.Args) }
 type Response struct {
 	Out  string
 	Code int
+	Err  error // 非 nil 時原樣回傳這個錯誤，優先於 Code
 }
 
 // Fake 是測試用的 Runner：記下每次呼叫，依指令行前綴回預設輸出。
@@ -36,6 +37,14 @@ func (f *Fake) On(prefix, out string, code int) {
 	f.Responses[prefix] = Response{Out: out, Code: code}
 }
 
+// OnError 設定指令行以 prefix 開頭時回傳指定的錯誤，例如 *ExitError 帶 stderr，或指令不存在。
+func (f *Fake) OnError(prefix string, err error) {
+	if f.Responses == nil {
+		f.Responses = map[string]Response{}
+	}
+	f.Responses[prefix] = Response{Err: err}
+}
+
 // Run 實作 Runner。
 func (f *Fake) Run(_ context.Context, name string, args []string, stdin []byte) ([]byte, error) {
 	c := Call{Name: name, Args: append([]string(nil), args...), Stdin: append([]byte(nil), stdin...)}
@@ -51,6 +60,9 @@ func (f *Fake) Run(_ context.Context, name string, args []string, stdin []byte) 
 		return nil, nil
 	}
 	r := f.Responses[best]
+	if r.Err != nil {
+		return []byte(r.Out), r.Err
+	}
 	if r.Code != 0 {
 		return []byte(r.Out), &ExitError{Cmd: line, Code: r.Code}
 	}

@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -161,9 +162,27 @@ func ImagesExist(ctx context.Context, r run.Runner, docs []map[string]any) []str
 			errs = append(errs, fmt.Sprintf("%s %s", ref, p))
 			continue
 		}
-		if _, err := r.Run(ctx, "skopeo", []string{"inspect", "--raw", "docker://" + ref}, nil); err != nil {
-			errs = append(errs, fmt.Sprintf("%s 在來源 registry 不存在", ref))
+		_, err := r.Run(ctx, "skopeo", []string{"inspect", "--raw", "docker://" + ref}, nil)
+		if errors.Is(err, exec.ErrNotFound) {
+			return []string{"skopeo not installed，無法檢查 registry"}
+		}
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s 在來源 registry 查不到：%s", ref, errReason(err)))
 		}
 	}
 	return errs
+}
+
+// errReason 取錯誤的 stderr 第一行；沒有 stderr 時用錯誤本身。
+func errReason(err error) string {
+	var ee *run.ExitError
+	if errors.As(err, &ee) {
+		for _, l := range strings.Split(ee.Stderr, "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				return l
+			}
+		}
+		return fmt.Sprintf("結束碼 %d", ee.Code)
+	}
+	return err.Error()
 }

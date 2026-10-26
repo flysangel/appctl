@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -431,6 +432,25 @@ func TestImagesExist(t *testing.T) {
 			t.Fatalf("錯誤：%v", errs)
 		}
 	})
+	t.Run("skopeo 沒裝：一次報錯就停", func(t *testing.T) {
+		f := &run.Fake{}
+		f.OnError("skopeo", &exec.Error{Name: "skopeo", Err: exec.ErrNotFound})
+		errs := ImagesExist(context.Background(), f, docs("example.io/a:1", "example.io/b:2"))
+		if len(errs) != 1 || !strings.Contains(errs[0], "skopeo not installed") {
+			t.Fatalf("錯誤：%v", errs)
+		}
+		if len(f.Calls) != 1 {
+			t.Fatalf("應只呼叫一次：%v", f.Lines())
+		}
+	})
+	t.Run("registry 一般錯誤附 stderr 第一行", func(t *testing.T) {
+		f := &run.Fake{}
+		f.OnError("skopeo", &run.ExitError{Cmd: "skopeo", Code: 1, Stderr: "unauthorized: fake denied\nsecond line\n"})
+		errs := ImagesExist(context.Background(), f, docs("example.io/a:1"))
+		if len(errs) != 1 || !strings.Contains(errs[0], "unauthorized: fake denied") || strings.Contains(errs[0], "second line") {
+			t.Fatalf("錯誤：%v", errs)
+		}
+	})
 	t.Run("短名不呼叫 skopeo", func(t *testing.T) {
 		f := &run.Fake{}
 		errs := ImagesExist(context.Background(), f, docs("demo"))
@@ -445,6 +465,34 @@ func TestImagesExist(t *testing.T) {
 		errs := ImagesExist(context.Background(), &run.Fake{}, nil)
 		if len(errs) != 1 || !strings.Contains(errs[0], "零個 image") {
 			t.Fatalf("錯誤：%v", errs)
+		}
+	})
+}
+
+// 對應 R16：appctl check 要跑每個有規則且有檔案的服務的機密一致性
+func TestSecrets(t *testing.T) {
+	goodEnv := "DB_PASSWORD=" + dbPW + "\nREDIS_PASSWORD=" + redisPW + "\n"
+	setup := func(t *testing.T, conf string) string {
+		root := t.TempDir()
+		write(t, root, "services/quay/base/deployment.yaml", quayDeployment)
+		write(t, root, "services/quay/secret/secret.env", goodEnv)
+		write(t, root, "services/quay/secret/config.yaml", conf)
+		return root
+	}
+	t.Run("一致", func(t *testing.T) {
+		if errs := Secrets(setup(t, quayConfig("quayuser", dbPW, "quay", redisPW, redisPW))); len(errs) != 0 {
+			t.Fatalf("不應有錯誤：%v", errs)
+		}
+	})
+	t.Run("不一致", func(t *testing.T) {
+		errs := Secrets(setup(t, quayConfig("quayuser", otherPW, "quay", redisPW, redisPW)))
+		if !strings.Contains(joined(errs), "DB_PASSWORD") {
+			t.Fatalf("錯誤：%v", errs)
+		}
+	})
+	t.Run("服務沒有那些檔就略過", func(t *testing.T) {
+		if errs := Secrets(t.TempDir()); len(errs) != 0 {
+			t.Fatalf("不應有錯誤：%v", errs)
 		}
 	})
 }
