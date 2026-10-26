@@ -9,10 +9,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/flysangel/appctl/internal/k8s"
 	"github.com/flysangel/appctl/internal/podman"
 	"github.com/flysangel/appctl/internal/quadlet"
 	"github.com/flysangel/appctl/internal/render"
 	"github.com/flysangel/appctl/internal/repo"
+	"github.com/flysangel/appctl/internal/run"
 	"github.com/flysangel/appctl/internal/setting"
 )
 
@@ -108,10 +110,13 @@ func runVerb(verb string, args []string) error {
 	if !slices.Contains(tracks, track) {
 		return fmt.Errorf("%s 沒有 %s 軌（有：%s）", svc, track, strings.Join(tracks, "、"))
 	}
+	ctx := context.Background()
+	if track == "k8s" {
+		return runK8s(ctx, verb, root, svc, track)
+	}
 	if !strings.HasPrefix(track, "podman") {
 		return fmt.Errorf("%s 軌的 %s 還沒實作", track, verb)
 	}
-	ctx := context.Background()
 	env := podman.DefaultEnv(root, track)
 	if verb == "stop" {
 		if err := podman.Stop(ctx, env, svc); err != nil {
@@ -132,6 +137,30 @@ func runVerb(verb string, args []string) error {
 		return nil
 	}
 	if err := podman.Delete(ctx, env, b); err != nil {
+		return err
+	}
+	fmt.Printf("Success: 已刪除 %s（%s），含資料卷\n", svc, track)
+	return nil
+}
+
+// runK8s 處理 k8s 軌：渲染後經 stdin 交給 kubectl，不要求 root。
+func runK8s(ctx context.Context, verb, root, svc, track string) error {
+	if verb == "stop" {
+		return k8s.Stop(svc)
+	}
+	manifest, err := render.Render(root, svc, track)
+	if err != nil {
+		return err
+	}
+	if verb == "apply" {
+		if err := k8s.Apply(ctx, run.Exec{}, manifest); err != nil {
+			return err
+		}
+		fmt.Printf("Success: 已部署 %s（%s）\n", svc, track)
+		return nil
+	}
+	env := k8s.Env{Runner: run.Exec{}, Track: track, Stdin: os.Stdin, Out: os.Stdout}
+	if err := k8s.Delete(ctx, env, svc, manifest); err != nil {
 		return err
 	}
 	fmt.Printf("Success: 已刪除 %s（%s），含資料卷\n", svc, track)
