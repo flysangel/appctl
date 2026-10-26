@@ -199,7 +199,7 @@ func TestExecQuotesArgs(t *testing.T) {
 	if !strings.Contains(c, wantEP) {
 		t.Fatalf("entrypoint 行不對，想要 %q\n%s", wantEP, c)
 	}
-	if strings.Contains(c, "Entrypoint=") && !strings.Contains(c, "--entrypoint=") {
+	if strings.Contains(c, "\nEntrypoint=") {
 		t.Fatal("podman 4.9.3 沒有 Entrypoint= 鍵")
 	}
 }
@@ -395,9 +395,9 @@ spec:
 	c := unit(t, b, "app-web.container")
 	for _, want := range []string{
 		"Environment=TZ=Asia/Taipei\n",
-		"Secret=app-PASS,type=env,target=PW\n",
-		"Secret=app-PASS,type=mount,target=/run/conf/PASS\n",
-		"Secret=app-conf.yaml,type=mount,target=/run/conf/conf.yaml\n",
+		"Secret=app_app_PASS,type=env,target=PW\n",
+		"Secret=app_app_PASS,type=mount,target=/run/conf/PASS\n",
+		"Secret=app_app_conf.yaml,type=mount,target=/run/conf/conf.yaml\n",
 		"Volume=/var/lib/appctl/app/configmap/app-conf:/etc/app:ro\n",
 		"Volume=/var/lib/appctl/app/configmap/app-conf/b.conf:/etc/one.conf:ro\n",
 		"Tmpfs=/dev/shm:size=2147483648\n",
@@ -419,7 +419,7 @@ spec:
 	if len(b.Secrets) != 1 || b.Secrets[0].Name != "app" || string(b.Secrets[0].Data["PASS"]) != "pass" || string(b.Secrets[0].Data["conf.yaml"]) != "conf" {
 		t.Fatalf("Secrets = %+v", b.Secrets)
 	}
-	if quadlet.PodmanSecretName("app", "PASS") != "app-PASS" {
+	if quadlet.PodmanSecretName("app", "app", "PASS") != "app_app_PASS" {
 		t.Fatal("PodmanSecretName")
 	}
 	if strings.Contains(c, "serviceAccount") {
@@ -435,7 +435,74 @@ func TestRejectsMissingSecretKey(t *testing.T) {
               name: nope
               key: PASS
 `
-	if _, err := quadlet.Translate("demo", docs(t, y), ports(t, "[ports]\napp = 8080:80\n")); err == nil {
-		t.Fatal("引用不存在的 secret 應該回錯")
+	_, err := quadlet.Translate("demo", docs(t, y), ports(t, "[ports]\napp = 8080:80\n"))
+	if err == nil || !strings.Contains(err.Error(), "Secret nope") || !strings.Contains(err.Error(), "PW") {
+		t.Fatalf("錯誤訊息要列出缺的 secret 名與變數名：%v", err)
+	}
+	y2 := `
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s
+data:
+  OTHER: eA==
+---
+` + y[1:]
+	y2 = strings.Replace(y2, "name: nope", "name: s", 1)
+	_, err = quadlet.Translate("demo", docs(t, y2), ports(t, "[ports]\napp = 8080:80\n"))
+	if err == nil || !strings.Contains(err.Error(), "沒有鍵 PASS") {
+		t.Fatalf("錯誤訊息要列出缺的鍵：%v", err)
+	}
+}
+
+func TestRejectsEmptyAndSemicolonArgs(t *testing.T) {
+	s := ports(t, "[ports]\napp = 8080:80\n")
+	for _, tc := range []struct{ extra, want string }{
+		{"        args: [a, \"\", b]\n", "空字串"},
+		{"        command: [sh, \"\"]\n", "空字串"},
+		{"        args: [find, ., -exec, rm, \"{}\", \";\"]\n", ";"},
+	} {
+		_, err := quadlet.Translate("demo", docs(t, oneContainer+tc.extra), s)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q 應該回錯並提到 %q：%v", tc.extra, tc.want, err)
+		}
+	}
+	// command 整個包在 --entrypoint 的 JSON 裡，單獨的 ; 不會被 systemd 當成分隔
+	if _, err := quadlet.Translate("demo", docs(t, oneContainer+"        command: [find, ., -exec, rm, \"{}\", \";\"]\n"), s); err != nil {
+		t.Fatalf("command 裡的 ; 不該回錯：%v", err)
+	}
+}
+
+func TestPodmanSecretNameNoCollision(t *testing.T) {
+	a := quadlet.PodmanSecretName("svc", "a", "b-c")
+	b := quadlet.PodmanSecretName("svc", "a-b", "c")
+	if a == b {
+		t.Fatalf("撞名：%s", a)
+	}
+	c := quadlet.PodmanSecretName("x-y", "z", "k")
+	d := quadlet.PodmanSecretName("x", "y-z", "k")
+	if c == d {
+		t.Fatalf("跨服務撞名：%s", c)
+	}
+	y := strings.Replace(oneContainer, "kind: Deployment", "kind: Deployment", 1)
+	if _, err := quadlet.Translate("my_svc", docs(t, y), ports(t, "[ports]\napp = 8080:80\n")); err == nil || !strings.Contains(err.Error(), "_") {
+		t.Fatalf("服務名含 _ 會讓 secret 名有歧義，應該回錯：%v", err)
+	}
+}
+
+func TestRejectsContainerNamedPod(t *testing.T) {
+	y := strings.Replace(oneContainer, "name: app", "name: pod", 1)
+	_, err := quadlet.Translate("demo", docs(t, y), ports(t, "[ports]\npod = 8080:80\n"))
+	if err == nil || !strings.Contains(err.Error(), "demo-pod") {
+		t.Fatalf("容器名 pod 會和 pod 服務撞名，應該回錯：%v", err)
+	}
+}
+
+func TestRejectsNilSetting(t *testing.T) {
+	if _, err := quadlet.Translate("demo", docs(t, oneContainer), nil); err == nil || !strings.Contains(err.Error(), "setting.conf") {
+		t.Fatalf("沒有 setting 應該回錯：%v", err)
+	}
+	if _, err := quadlet.Translate("demo", docs(t, oneContainer), &setting.Setting{}); err == nil {
+		t.Fatal("空的 [ports] 應該回錯")
 	}
 }

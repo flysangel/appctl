@@ -34,7 +34,7 @@ type File struct {
 }
 
 // Secret 是一個 k8s Secret，Data 是 base64 解碼後的值。
-// 每個鍵對應一個 podman secret，名字用 PodmanSecretName(Name, 鍵)。
+// 每個鍵對應一個 podman secret，名字用 PodmanSecretName(Bundle.Service, Name, 鍵)。
 type Secret struct {
 	Name string
 	Data map[string][]byte
@@ -49,9 +49,12 @@ type Bundle struct {
 	Volumes     []string
 }
 
-// PodmanSecretName 回傳 k8s Secret 的一個鍵對應的 podman secret 名。
-func PodmanSecretName(secret, key string) string {
-	return secret + "-" + key
+// PodmanSecretName 回傳 k8s Secret 的一個鍵對應的 podman secret 名：<svc>_<secret>_<鍵>。
+// podman secret 整台主機共用，名字不能跨服務或跨 Secret 撞到。用 _ 分隔不會有歧義：
+// k8s Secret 名是 DNS subdomain，不含 _；服務名由 Translate 擋掉 _；
+// 所以第一個 _ 前是服務名、第二個 _ 前是 Secret 名，其餘是鍵（鍵可以含 _）。
+func PodmanSecretName(svc, secret, key string) string {
+	return svc + "_" + secret + "_" + key
 }
 
 // ConfigDir 回傳 ConfigMap 在主機上的目錄，底下每個鍵一個檔。
@@ -88,11 +91,17 @@ func (t *translator) fail(format string, a ...any) {
 	t.errs = append(t.errs, fmt.Sprintf(format, a...))
 }
 
-// Translate 把一個服務的渲染產物翻成 Quadlet 單元。s 是 setting.conf，決定 pod 的主機埠。
+// Translate 把一個服務的渲染產物翻成 Quadlet 單元。s 是 setting.conf，決定 pod 的主機埠，不能是 nil 或空。
 // 白名單外的欄位與無法翻譯的值全部列出後一起回錯。
 func Translate(svc string, docs []map[string]any, s *setting.Setting) (*Bundle, error) {
 	if bad := checkWhitelist(docs); len(bad) > 0 {
 		return nil, fmt.Errorf("%s 有翻譯器不支援的欄位或 kind：\n  %s", svc, strings.Join(bad, "\n  "))
+	}
+	if strings.Contains(svc, "_") {
+		return nil, fmt.Errorf("服務名 %q 不能含 _：podman secret 名用 _ 分隔服務名、Secret 名與鍵", svc)
+	}
+	if s == nil {
+		return nil, fmt.Errorf("%s 缺少 setting.conf：podman 軌一定要有 [ports]，否則主機埠會消失", svc)
 	}
 	t := &translator{svc: svc, configMaps: map[string]map[string]string{},
 		secrets: map[string]map[string][]byte{}, volumes: map[string]*volume{}}
@@ -114,6 +123,9 @@ func Translate(svc string, docs []map[string]any, s *setting.Setting) (*Bundle, 
 			if typ, _ := d["type"].(string); typ != "" && typ != "Opaque" {
 				t.fail("Secret/%s：只支援 type Opaque，收到 %s", name, typ)
 			}
+			if strings.Contains(name, "_") {
+				t.fail("Secret/%s：名字不能含 _（k8s 也不允許）", name)
+			}
 			sec := Secret{Name: name, Data: map[string][]byte{}}
 			for k, v := range data {
 				str, _ := v.(string)
@@ -133,10 +145,8 @@ func Translate(svc string, docs []map[string]any, s *setting.Setting) (*Bundle, 
 		return nil, fmt.Errorf("%s 要剛好一個工作負載（Pod、Deployment、DaemonSet 或 StatefulSet），收到 %d 個", svc, len(workloads))
 	}
 	w := workloads[0]
-	if s != nil {
-		if err := setting.Validate(s, docs); err != nil {
-			return nil, err
-		}
+	if err := setting.Validate(s, docs); err != nil {
+		return nil, err
 	}
 
 	spec, _ := w["spec"].(map[string]any)
@@ -248,10 +258,8 @@ func Translate(svc string, docs []map[string]any, s *setting.Setting) (*Bundle, 
 func (t *translator) podUnit(s *setting.Setting) File {
 	var cmd strings.Builder
 	cmd.WriteString("/usr/bin/podman pod create --replace --name " + Escape(t.svc))
-	if s != nil {
-		for _, p := range s.Ports {
-			fmt.Fprintf(&cmd, " -p %d:%d/%s", p.HostPort, p.ContainerPort, strings.ToLower(p.Protocol))
-		}
+	for _, p := range s.Ports {
+		fmt.Fprintf(&cmd, " -p %d:%d/%s", p.HostPort, p.ContainerPort, strings.ToLower(p.Protocol))
 	}
 	content := fmt.Sprintf(`[Unit]
 Description=%[1]s pod
@@ -268,6 +276,9 @@ ExecStop=/usr/bin/podman pod rm -f %[1]s
 func (t *translator) containerUnit(c map[string]any, restart string) File {
 	cname, _ := c["name"].(string)
 	full := t.svc + "-" + cname
+	if cname == "pod" {
+		t.fail("容器名不能叫 pod：%s-pod.container 產生的 %s-pod.service 會和 pod 服務撞名", t.svc, t.svc)
+	}
 	podSvc := t.svc + "-pod.service"
 	var u strings.Builder
 	line := func(k, v string) { u.WriteString(k + "=" + v + "\n") }
@@ -303,6 +314,8 @@ func (t *translator) containerUnit(c map[string]any, restart string) File {
 	args := strs(c["args"])
 	t.checkVarRefs(cname, "command", command)
 	t.checkVarRefs(cname, "args", args)
+	t.checkWords(cname, "command", command, false)
+	t.checkWords(cname, "args", args, true)
 	if len(command) > 0 {
 		// podman 4.9.3 的 Quadlet 沒有 Entrypoint= 鍵；k8s 的 command 對應 --entrypoint，
 		// 用 JSON 陣列形式才能帶多個字。
@@ -329,7 +342,7 @@ func (t *translator) containerUnit(c map[string]any, restart string) File {
 			} else if _, ok := data[key]; !ok {
 				t.fail("容器 %s 的環境變數 %s 引用的 Secret %s 沒有鍵 %s", cname, name, sn, key)
 			}
-			line("Secret", Escape(PodmanSecretName(sn, key)+",type=env,target="+name))
+			line("Secret", Escape(PodmanSecretName(t.svc, sn, key)+",type=env,target="+name))
 			continue
 		}
 		val, _ := em["value"].(string)
@@ -370,11 +383,12 @@ func (t *translator) containerUnit(c map[string]any, restart string) File {
 				if _, ok := t.secrets[v.secret][sub]; !ok {
 					t.fail("容器 %s 掛載卷 %s：Secret %s 沒有鍵 %s", cname, vname, v.secret, sub)
 				}
-				line("Secret", Escape(PodmanSecretName(v.secret, sub)+",type=mount,target="+mpath))
+				line("Secret", Escape(PodmanSecretName(t.svc, v.secret, sub)+",type=mount,target="+mpath))
 				continue
 			}
+			// podman 把每個鍵各自掛成一個檔；k8s 是把整個目錄換掉，映像在該目錄的其他檔這裡會留著。
 			for _, k := range keys {
-				line("Secret", Escape(PodmanSecretName(v.secret, k)+",type=mount,target="+path.Join(mpath, k)))
+				line("Secret", Escape(PodmanSecretName(t.svc, v.secret, k)+",type=mount,target="+path.Join(mpath, k)))
 			}
 		case v.memory:
 			v.users++
@@ -399,6 +413,20 @@ func (t *translator) containerUnit(c map[string]any, restart string) File {
 	u.WriteString("\n[Install]\n")
 	line("WantedBy", "multi-user.target")
 	return File{Name: full + ".container", Dir: DirQuadlet, Content: []byte(u.String())}
+}
+
+// checkWords 擋 Quadlet 會弄壞的字（podman 4.9.3 實測）：空字串會讓 Quadlet 截斷整行或其後的字，
+// 而且不報錯；單獨一個 ; 解引號後裸寫進 ExecStart，systemd 當成命令分隔。
+// command 整個包在 --entrypoint 的 JSON 裡是一個字，; 不受影響，只擋空字串。
+func (t *translator) checkWords(cname, field string, vals []string, semicolon bool) {
+	for i, v := range vals {
+		if v == "" {
+			t.fail("容器 %s 的 %s 第 %d 個元素是空字串，Quadlet 會靜默截斷", cname, field, i+1)
+		}
+		if semicolon && v == ";" {
+			t.fail("容器 %s 的 %s 第 %d 個元素是單獨的 ;，systemd 會當成命令分隔", cname, field, i+1)
+		}
+	}
 }
 
 // checkVarRefs 擋 k8s 的 $(VAR) 展開與 $$ 跳脫：podman 不做這兩件事，照搬會改變指令的意思。
