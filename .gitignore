@@ -1,4 +1,4 @@
-# 機密：永不追蹤（真值放各服務 secret/secret.env，由 secretGenerator 產生 K8s Secret）
+# 機密：*.env 與金鑰檔一律不追蹤，只放行下面列出的 demo 值檔（進版控，真值只在部署主機上）。
 .env
 *.env
 !.env.example
@@ -8,32 +8,20 @@
 id_rsa*
 **/secrets/
 
+# demo 機密檔：明確放行，其餘 *.env 照擋
+!services/*/secret/secret.env
+!services/gmm/mapping.env
+!services/gmm/sync.secret.env
+
 # build / render 產出
 build/
 
-# 服務營運機密（sync 工具）。sync.secret.env 與 gmm 的 mapping.env 由上方 *.env 擋住；sync.conf 不含機密，進版控
+# gmm seed 自動產生的使用者密碼，唯一留存處，不進版控
 random.csv
 
 # Python
 __pycache__/
 *.pyc
-
-# 機密檔卷真值（quay config.yaml 等）；範本 .example 仍入庫。
-# 這段分三步：先解除上方機密段 **/secrets/ 的目錄級排除，再排除內容，最後放行 example。
-# 不先解除，git 不會進入該目錄，下方的放行就無效。
-!services/*/secrets/
-services/*/secrets/**
-!services/*/secrets/**/
-!services/*/secrets/**/*.example
-
-# 單數 secret/：機密真值檔 deny-by-default，只放行範本與 kustomize 宣告。
-# 複數 secrets/ 的規則（上方）留給遷移期，遷移完成後可一併清掉。
-# quay 的 config.yaml 不是 .env，機密段的 *.env 擋不到它。少了這段，git 會追蹤到明文密碼。
-!services/*/secret/
-services/*/secret/**
-!services/*/secret/**/
-!services/*/secret/*.example
-!services/*/secret/kustomization.yaml
 
 # SDD 工作區：計畫執行期的 ledger 與 review 產物，非交付物
 .superpowers/
@@ -50,3 +38,6 @@ services/*/secret/**
 /tests/test_build_dataset.py
 /tests/test_slides_extract.py
 /tests/test_split_corpus.py
+
+# appctl 編譯產物
+/bin/appctl

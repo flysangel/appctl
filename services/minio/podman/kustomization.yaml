@@ -1,12 +1,42 @@
-# S3 物件儲存；podman 單節點/k8s 分散式（StatefulSet）。可直接 kubectl kustomize。
-# image 以 digest 釘選，和 base/statefulset.yaml 是同一顆，改版時要一起改。
+# minio podman 軌 overlay：共用 base，改成單節點。主機埠寫在同目錄的 setting.conf。
+# image 以 digest 釘選，在 base/statefulset.yaml；juicefs 的 minio sidecar 是同一顆，改版時要一起改。
 # 機密（root 帳密）由 ../secret 的 secretGenerator 產生（Secret minio）。
-# 本軌不引用 ../base：podman kube play 不支援 StatefulSet（實測 exit 125），自帶 pod.yaml。
-# namespace 對 podman kube play 無作用，保留是為了與 k8s 軌產物一致。
+# namespace 對 podman 端無作用，保留是為了與 k8s 軌產物一致。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: default
 resources:
+- ../base
 - ../secret
-- pod.yaml
+patches:
+# 單節點：replicas 降為 1，args 改成單目錄，兩個 volumeClaimTemplates 併成 minio-data。
+# 卷名 minio-data 與舊 kube play 路徑的卷同名，切換後資料會接回。
+- target:
+    kind: StatefulSet
+    name: minio
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+    - op: test
+      path: /spec/template/spec/containers/0/name
+      value: minio
+    - op: replace
+      path: /spec/template/spec/containers/0/args
+      value: [server, /data, --console-address, ":9001"]
+    - op: replace
+      path: /spec/template/spec/containers/0/volumeMounts
+      value:
+      - name: minio-data
+        mountPath: /data
+    - op: replace
+      path: /spec/volumeClaimTemplates
+      value:
+      - metadata:
+          name: minio-data
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 10Gi

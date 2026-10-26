@@ -2,39 +2,80 @@
 
 ## 1. 目前狀態
 
-- 標準驗證路徑：`task doctor` → `task lint` → `task test`。真環境驗證照 `AGENTS.md`〈完成定義〉的 L3，要部署服務。
+- 標準驗證路徑：`task doctor` → `task lint` → `task test`，push 後看 GitHub Actions 的 `ci`。真環境驗證照 `AGENTS.md`〈完成定義〉的 L3。
 - 綠的層：`task doctor`、`task lint`、`task test`。
+- 控制面是 `appctl`（Go），podman 軌走 Quadlet。`bin/svc.sh`、`podman kube play` 路徑與 F9 以外的 Python 工具都已刪除。
 - 已跑過 harness-adopt，`bin/check-docs.py` 與 `.githooks/` 是範本 repo 的新契約副本。
 - 已套用 `~/.claude/rules/directories.md`，例外列在 `docs/ARCHITECTURE.md`〈目錄結構〉。
 - 已套用 `~/.claude/rules/taskfile.md`〈分類原則〉，`bin/check-taskfile.py` 驗過。
-- 真環境驗過：podman `delete` 在 rootful 下會刪掉 Deployment（filebrowser）與 Pod（minio）的卷；`task smoke -- filebrowser grafana` 通過；`services/gmm/sync.py` 用 `mapping.env.example` 對正式 gmm 跑了兩次，第二次只覆寫、不新建，冪等成立。
-- 正式 gmm 現在有範本建出的測試資料：user alice、bob，group LAB，兩條帶 `.X` 的連線。密碼在主工作樹的 `services/gmm/random.csv`。主工作樹沒有 `mapping.env` 與 `sync.secret.env`，第一次用真清單 seed 時，這些測試資料會被當成「以外」刪掉。
-- 未驗證：ncb 的憑證順序、「拆 pod 留卷」的手動做法，見〈待辦〉。
-- 主工作樹的 quay `secret.env` 和 `.example` 內容相同，`task lint:secret SVC=quay` 判為佔位值。
+- 未驗證：`appctl` 的部署動詞與服務子命令都還沒在真環境跑過；GitHub Actions 的 `ci` 與 `release` 還沒在 GitHub 上跑過。清單見〈待辦〉。
+- 正式服務仍是舊版 `podman kube play` 部署的，還沒切換到 `appctl`。
+- 正式 gmm 現在有範本建出的測試資料：user alice、bob，group LAB，兩條帶 `.X` 的連線。密碼在主工作樹的 `services/gmm/random.csv`。第一次用真清單 seed 時，這些測試資料會被當成「以外」刪掉。
 - blocker：沒有。
 
 ## 2. 待辦
 
 還沒做的工程與維運待辦，一行一條。做完或不再成立就刪掉，紀錄寫在 commit 訊息，查 `git log`。有觸發條件的，句尾括號寫什麼時候做。
 
+**merge 後先做：**
+
+- push main，確認 GitHub Actions 的 `ci` 第一次跑是綠的
+- push `v0.1.0-rc.1` tag 發布預發布版，再用 `install.sh` 帶版本在部署主機裝一次，確認 sha256 驗證與 `appctl version`（正式 `v0.1.0` 等 rc 驗完再問使用者）
+- `.githooks/pre-push` 的 `REPO_CHECKS` 改成呼叫 `appctl check`：merge 後它列的 `check-manifests.py`、`check-services.py` 已刪，那道檢查印 `Info:` 略過，push 前本機不擋，只靠 CI（改 F9 範本時一起改）
+
+**真環境驗證（每項先問使用者）：**
+
+- podman 軌在這台主機跑 `apply`、`stop`、`delete`：先 filebrowser，再多容器服務與 minio；確認 `stop` 後重開機會回來、`delete` 後卷與 secret 都不在
+- `appctl smoke` 跑一輪 podman 軌的服務，貼出輸出
+- podman 換 secret：rootless 4.9.3 已驗過容器還在引用時能先刪再建；還要驗 rootful，以及重啟後的容器讀到新值（`apply` 改了機密檔時）
+- `Tmpfs=`（`emptyDir` 加 `medium: Memory`）在 pod 內的行為，例如 `/dev/shm` 大小（有 podman 軌服務用到時）
+- `appctl quay init` 對真 quay 確認「已初始化」的回應形狀與 quay 版本（現在依文件寫成 HTTP 400 加 `non-empty database`）
+- `appctl ncb cert` 自簽：放進 `ncb-certbot` 卷後 nginx 起得來；ACME 要公網網域，等有網域時再驗，包含自簽之後跑 ACME 會先把自簽目錄移到 `live/<網域>.selfsigned/`（未驗）
+- k8s 軌在 infra-k8s 的叢集跑 `apply`、`delete`，以及 gmm、quay 子命令的自動 port-forward（每次 `delete` 前確認該服務在叢集上沒有正式資料）
+- `appctl gmm seed` 對正式 gmm 跑兩次，確認第二次只覆寫、不新建（冪等）
+
+**正式服務切換：**
+
+- 正式服務從 `podman kube play` 切到 `appctl`：逐一 `sudo podman pod rm -f <pod>`（留卷），改好部署主機 clone 裡的真值檔，再 `sudo appctl apply`，確認 `VolumeName=` 接回舊資料；先拿一個有資料卷的服務試
+- 切換時一併刪掉 kube play 留下的舊 podman secret（用 `sudo podman secret ls` 列出）（切換每個服務時）
+- merge 後沒有 `svc.sh`，切換前的舊 pod 直接用 `sudo podman pod` 管理（merge 後到切換完成前）
+
+**工程：**
+
 - minio 與 juicefs 改用 tag 釘映像：先等 images 替 `minio/minio` 同步版本 tag（列在 images 的 `docs/PROGRESS.md`，mirror 現在只有 `latest`），再改用 `command grep -rln 'sha256:' services/` 列出的每份 manifest
-- 決定 quay `secret.env` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 去留：沒有容器引用它們，quay 讀的是 `config.yaml` 內的同名鍵，兩處各自漂移。拿掉，或讓 `bin/check-secret.py` 也比對這兩鍵
-- 補 `services/quay/sync.sh` 種第一位 superuser（等 `/health/instance` 回 200 後 `POST /api/v1/user/initialize`），讓 `task seed SVC=quay` 接手 `README.md`〈quay 的第一位 superuser〉的手動步驟
+- 決定 quay `secret.env` 的 `SECRET_KEY`、`DATABASE_SECRET_KEY` 去留：沒有容器引用它們，quay 讀的是 `config.yaml` 的同名鍵，而 demo 的 `config.yaml` 這兩鍵還是字面值 `${…}`。拿掉 `secret.env` 的兩鍵並在 `config.yaml` 填 demo 值，或讓 `appctl check` 的機密一致性也比對這兩鍵
 - `services/quay/k8s/ingress.yaml` 補 `nginx.ingress.kubernetes.io/proxy-body-size`：ingress-nginx 文件的預設 body 上限是 1m，推映像層會 413；infra-k8s 的 ingress addon 沒有全域設定
-- quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`task apply` 回來時 quay 還沒就緒
+- quay 補 readinessProbe（`GET /health/instance`）：第一次啟動要跑 migration，`appctl apply` 回來時 quay 還沒就緒
 - grafana 的 admin 密碼納入 `secret/secret.env`（`GF_SECURITY_ADMIN_PASSWORD`），不再用上游預設 admin/admin。做完改 `README.md`〈grafana 的第一次登入〉
-- 決定 ncb 的 certbot 容器去留：`server_name` 是 `ncb.local`，ACME 不簽，手放的憑證沒有 renewal 設定檔，`renew` 迴圈等於沒做事。拿掉容器，或改成公網網域（公網 DNS 不在本 repo 範圍）。做完改 `docs/ARCHITECTURE.md`〈已知的結構性限制〉ncb 那條與 `README.md`〈ncb 的憑證〉
+- 決定 ncb 的 certbot 容器去留：`server_name` 是 `ncb.local`，ACME 不簽，自簽憑證沒有 renewal 設定檔，`renew` 迴圈等於沒做事。拿掉容器，或改成公網網域（公網 DNS 不在本 repo 範圍）。做完改 `docs/ARCHITECTURE.md`〈已知的結構性限制〉ncb 那條與 `README.md`〈ncb 的憑證〉
+- `appctl delete` 沒停 `<claim>-volume.service`，delete 後留下 active 的孤兒單元（下次改 `internal/podman` 的 delete 時）
+- `appctl delete` 不靠這次的渲染與翻譯：manifest 壞掉時現在刪不掉已部署的服務，改成只靠 `deployed.json` 也能刪
+- `appctl apply` 刪舊 podman secret 失敗時，錯誤被吸收而且從紀錄移除，真值留在主機上；改成留在紀錄或用 `podman secret exists` 確認
+- 翻譯器替 Secret 的每個鍵都建 podman secret，包含沒人引用的 `QUAY_SUPERUSER_*`；改成只建單元引用到的鍵
+- `appctl gmm` 的 `mapping.env` 補 CRLF 與行尾空白的測試：拿掉那行處理時，seed 會刪光重建全部連線
+- `k8s.PortForward` 讀不到埠時先 Wait 後 Stop，kubectl 輸出超長行時可能卡住；補逾時與 ctx 取消的測試
+- `.github/workflows/` 的 action 改釘 commit SHA
+- k8s 軌 `delete` 遇到 StatefulSet 時仍印「含資料卷」，但動態 PVC 沒刪；而且先渲染再確認，manifest 壞掉時連確認都到不了。訊息改成依實際刪了什麼，確認移到渲染前
+- podman 軌 `apply` 保留被拿掉的卷時不印 `Info:`；`deployed.json` 壞掉時的錯誤沒寫下一步。兩處都補訊息
+- 翻譯器遇到兩個卷用同一個 `claimName` 時產生重複的 `.volume`；改成合併或報錯
+- `appctl ncb cert` 的 `--email` 與網域以 `-` 開頭時沒擋，會被 certbot 當成旗標；ACME 的 stdout 被丟掉，失敗時看不到 certbot 的說明
+- `appctl ncb cert --acme` 的 certbot 呼叫補 `--non-interactive --keep-until-expiring`：lineage 已存在時重簽，certbot 可能停在互動選單而失敗
+- `services/gmm/sync.conf` 的 `GUACAMOLE_SERVER` 寫死主機埠 8080，podman 軌的 `appctl gmm` 仍讀它；改成從 `setting.conf` 查，像 smoke 與 `quay init` 一樣
 - 安裝 `yamllint`，對全部 `kustomization.yaml` 跑一次語法檢查
 
 **以下有觸發條件才做：**
 
-- 把 `[[ … ]] && { …; }` 獨立語句改成 `if`，位置用 `git grep -n -E '^\s*\[\[.*\]\]\s*&&\s*\{' -- '*.sh'` 查（要替某支腳本加 errexit 時）
-- `bin/assert-images.sh` 補兩件：任一軌 `kubectl kustomize` 失敗時要回非零（現在另一軌有產出就印 `Success`）；錯誤訊息分開講 kubectl 與 skopeo（改這支檔時）
-- `.gitignore` 刪掉沒有對應目錄的複數 `secrets/` 規則、`build/` 與「留給遷移期」的註解；單數 `secret/` 的放行規則改成也涵蓋子目錄（改這支檔時）
+- podman 軌是否也把 `systemctl`、`podman` 的輸出吞掉，跟 k8s 軌修過的問題一樣（下次改 `internal/podman` 時）
+- k8s 軌 `kubectl` 成功時的 stderr warning 被丟掉，`run.Runner` 不回 stderr（下次改 `internal/run` 時）
+- `appctl ncb cert --force` 換 key 後 cert 寫入失敗，會留下新 key 配舊 cert；改成兩個都寫好再 rename（下次改 `internal/ncb` 時）
+- `setting.conf` 同一服務內重複的主機埠沒有檢查，現在只查跨服務撞埠（下次改 `internal/setting` 時）
+- podman secret 名長度上限 253 沒有檢查（服務名、Secret 名或鍵名變長時）
+- `gmm.ReadConf` 是通用的 env 解析器卻放在 `internal/gmm`，quay 也用；沒加引號的值遇到空白會截斷。抽成 `internal/envfile`（第三個子命令要讀 env 檔時）
+- `appctl` 沒處理 SIGTERM，port-forward 的 kubectl 可能留著（有人用 cron 或 systemd 跑子命令時）
+- `appctl check` 補一道：`secret/kustomization.yaml` 要有 `disableNameSuffixHash: true`，現在沒有程式擋（加新服務的機密時）
+- `.gitignore` 刪掉沒有對應目錄的 `**/secrets/` 與 `build/` 規則（改這支檔時）
 - `tests/test_manifest_diff.py` 合併重複的 helper（`run_diff` 與 `_run`），寫死的 `"python3"` 改成 `sys.executable`（改這支檔時）
 - 同 pod 多容器的服務（quay、gmm、grafana）都沒有啟動順序控制：quay-app 先起來時連不上 redis、guacamole 等 mariadb 建 schema、grafana 連不上 3306，都靠重啟自癒。補就緒等待或 readinessProbe（上游改變啟動時序，或不再自癒時）
-- gmm 接 AD 時開 LDAP：映像有 LDAP 擴充，在 `services/gmm/base/deployment.yaml` 加 `LDAP_*` env，`LDAP_SEARCH_BIND_PASSWORD` 走 `secret/secret.env`（要接 AD 時）
+- gmm 接 AD 時開 LDAP：映像有 LDAP 擴充，在 `services/gmm/base/deployment.yaml` 加 `LDAP_*` env，`LDAP_SEARCH_BIND_PASSWORD` 走 `secret/secret.env`；翻譯器白名單照收（要接 AD 時）
 - gmm 的 guacd 一直以 `GUACD_LOG_LEVEL=debug` 跑，正式環境改 `info`（log 量成問題時）
 - ncb 的 `default.conf` 對所有請求固定送 `Connection "upgrade"`，沒有 `proxy_buffering off`。改成 `map $http_upgrade` 決定 Connection 值，並補 `proxy_buffering off`（上游回 400，或串流回應卡住時）
-- 實測 ncb 的憑證順序：先放自簽讓 nginx 起來、再 `certonly --webroot`、再 `nginx -s reload`。現在 README 寫的是這個順序但沒跑過；結果寫回 `README.md`〈ncb 的憑證〉（下次改 ncb 啟動流程時）
-- 驗「拆 pod 留卷」的手動做法：`kubectl kustomize services/<svc>/podman | sudo podman kube down -` 不帶 `--force` 是否留下具名卷。成立就寫進 `README.md`〈拆除與暫停〉（有人要暫停又不能用 `pod stop` 時）

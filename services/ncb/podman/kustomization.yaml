@@ -1,7 +1,7 @@
 # ncb podman 軌 overlay：共用 base ＋ 本軌的 nginx 設定檔。
 # default.conf 只有本軌持有，不進 base/；內的裸 $host／$remote_addr 是 nginx 語法，
 # kustomize 不碰它。
-# namespace 對 podman kube play 無作用，保留是為了與其他服務的產物一致。
+# namespace 對 podman 軌無作用，保留是為了與其他服務的產物一致。
 namespace: default
 resources:
   - ../base

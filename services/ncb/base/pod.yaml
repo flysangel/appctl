@@ -19,10 +19,8 @@ spec:
     ports:
     - containerPort: 80
       protocol: TCP
-      hostPort: 80
     - containerPort: 443
       protocol: TCP
-      hostPort: 443
     volumeMounts:
     - name: ncb-conf
       mountPath: /etc/nginx/conf.d

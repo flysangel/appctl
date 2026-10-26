@@ -42,6 +42,7 @@ want() {
 need task 'go-task' 'Falls back to the "default" task' task --help
 need kubectl 'kubectl' '^Client Version: ' kubectl version --client
 need python3 'Python 3' '^Python 3\.' python3 --version
+need go 'Go' '^go version go' go version
 need shellcheck 'ShellCheck' 'ShellCheck' shellcheck --version
 need gitleaks 'gitleaks' 'Gitleaks scans code' gitleaks --help
 
@@ -51,11 +52,9 @@ if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import yaml' >/dev/null 2
   fail=1
 fi
 
-want skopeo 'task check:image'
-want podman 'podman 軌的 apply、delete'
-want sudo 'podman 軌的 apply、delete'
-want nmap 'gmm 的 task seed'
-want curl 'task smoke'
+want skopeo 'appctl check-images'
+want podman 'appctl 的 podman 軌（apply、delete、smoke）'
+want sudo 'appctl 的 podman 軌（apply、delete、smoke）'
 
 # local 或 worktree 作用域的 core.hooksPath 會讓 git 不經過帳號層派工 hook，機密掃描靜默失效
 scopes="$(git config --show-scope --get-all core.hooksPath || true)"

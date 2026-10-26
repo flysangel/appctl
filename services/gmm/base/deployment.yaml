@@ -96,7 +96,7 @@ spec:
           mountPath: /var/lib/mysql
       volumes:
       # recordings 由 guacamole 與 guacd 共掛（錄影檔共享），mariadb 資料另掛 gmm-db。
-      # podman 軌由 kube play 把 PVC 轉為具名卷（名稱＝claimName）。
+      # podman 軌由 Quadlet 把 PVC 轉為具名卷（名稱＝claimName）。
       - name: recordings
         persistentVolumeClaim:
           claimName: gmm-recordings

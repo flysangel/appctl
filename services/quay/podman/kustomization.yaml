@@ -1,21 +1,7 @@
-# quay podman 軌 overlay：共用 base ＋ 本軌專屬的 hostPort。
+# quay podman 軌 overlay：共用 base。主機埠寫在同目錄的 setting.conf。
 # 只開 quay-app 的 8080；postgres 與 redis 只在 pod 內 127.0.0.1 可達，維護走 sudo podman exec。
-# namespace 對 podman kube play 無作用，保留是為了與 k8s 軌產物一致。
+# namespace 對 podman 端無作用，保留是為了與 k8s 軌產物一致。
 namespace: default
 resources:
   - ../secret
   - ../base
-patches:
-  # 用 JSON6902 而非 strategic merge：後者對 ports 的合併鍵是 (containerPort, protocol)，
-  # 漏寫 protocol 會靜默不套用、hostPort 憑空消失且產物看起來正常。
-  # op: test 是護欄——6902 靠索引定位，base 重排容器時索引會指到別的容器。
-  - target:
-      kind: Deployment
-      name: quay
-    patch: |-
-      - op: test
-        path: /spec/template/spec/containers/0/name
-        value: quay-app
-      - op: add
-        path: /spec/template/spec/containers/0/ports/0/hostPort
-        value: 8080

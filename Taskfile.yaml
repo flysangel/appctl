@@ -16,7 +16,7 @@ tasks:
 
   ops:
     cmds:
-      - task --list-all | grep -F "[維運]"
+      - echo '維運動作已改成 appctl 子命令，見 appctl 不帶參數的用法說明（task bootstrap 產生 bin/appctl）'
     silent: true
 
   doctor:
@@ -25,103 +25,21 @@ tasks:
       - bash bin/doctor.sh
 
   lint:
-    desc: "[開發] 離線靜態檢查：四大文件、Taskfile、manifest 的 image、服務層規則、機密範本、shellcheck"
+    desc: "[開發] 離線靜態檢查：四大文件、Taskfile、appctl check（image、服務層規則）、shellcheck"
     cmds:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
-      - python3 bin/check-manifests.py
-      - python3 bin/check-services.py
-      - python3 bin/check-examples.py
-      - shellcheck -S error -x bin/svc.sh bin/assert-images.sh bin/doctor.sh bin/smoke.sh bin/render-diff.sh services/gmm/sync.sh
+      - go run ./cmd/appctl check
+      - shellcheck -S error -x bin/doctor.sh bin/render-diff.sh install.sh
       - shellcheck -S warning .githooks/pre-push
 
-  smoke:
-    # 確認由腳本負責：bin/svc.sh
-    desc: "[開發]【破壞性】podman 軌煙測：apply、探測、再 apply、delete，delete 會刪卷（用法：task smoke -- gmm grafana）"
-    summary: |
-      轉派至 bin/smoke.sh。每個服務的 delete 都經 bin/svc.sh，會要求輸入服務名確認。
-      ncb、kadm、xadm-* 預設拒跑，要加 --allow-guarded。沒有 podman 軌的服務直接跳過。
-      一個服務失敗記錄後繼續跑下一個，全部跑完才決定結束碼。
-    preconditions:
-      - { sh: "[[ -n '{{.CLI_ARGS | default \"\"}}' ]]", msg: "用法：task smoke -- gmm grafana（未提供服務名）" }
+  bootstrap:
+    desc: "[開發] 編譯 appctl 到 bin/appctl（需要 go 在 PATH）"
     cmds:
-      - bash bin/smoke.sh {{.CLI_ARGS}}
-
-  lint:secret:
-    desc: "[開發] 比對機密真值在各檔之間一致，只印鍵名不印值（用法：task lint:secret SVC=quay）"
-    preconditions:
-      - { sh: "[[ -n '{{.SVC | default \"\"}}' ]]", msg: "用法：task lint:secret SVC=quay（未提供 SVC）" }
-    cmds:
-      - python3 bin/check-secret.py '{{.SVC | default ""}}'
+      - go build -o bin/appctl ./cmd/appctl
 
   test:
-    desc: "[開發] 單元測試，離線；自動收集 tests/test_*.py，每支都要印 ALL <n> PASS"
+    desc: "[開發] 單元測試，離線；先跑 go test，再自動收集 tests/test_*.py，每支都要印 ALL <n> PASS"
     cmds:
+      - go test ./...
       - python3 bin/run-tests.py
-
-  check:image:
-    desc: "[開發] 確認渲染後每個 image 都是完整參照，且仍存在於來源 registry（skopeo inspect；用法：task check:image SVC=grafana）"
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: "用法：task check:image SVC=grafana（未提供 SVC）"
-    cmds:
-      - bash bin/assert-images.sh '{{.SVC}}'
-
-  apply:
-    desc: "[維運] 部署服務（用法：task apply SVC=grafana TRACK=podman）"
-    summary: |
-      轉派至 bin/svc.sh。k8s 軌跑 kubectl apply -k；podman 軌把 kubectl kustomize 的輸出接給 sudo podman kube play --replace。
-      k8s 軌套用到當前 KUBECONFIG context 所指的叢集，namespace 由該軌 kustomization.yaml 的 namespace 欄決定。
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: '用法：task apply SVC=grafana TRACK=podman（未提供 SVC）'
-      - sh: "[ -n '{{.TRACK}}' ]"
-        msg: '用法：task apply SVC=grafana TRACK=podman（未提供 TRACK）'
-    cmds:
-      - bash bin/svc.sh '{{.SVC}}' apply '{{.TRACK}}'
-
-  delete:
-    # 確認由腳本負責：bin/svc.sh
-    desc: "[維運]【破壞性】拆除服務，k8s 連 PVC、podman 連卷（用法：task delete SVC=grafana TRACK=podman）"
-    summary: |
-      不可逆。執行前會要求輸入服務名確認；無 tty（cron／CI）時 read 失敗、腳本中止、什麼都不刪。
-      k8s 軌 kubectl delete 全部資源含 PVC（叢集 StorageClass reclaimPolicy 為 Delete，資料會連動刪除）。
-      StatefulSet 的 volumeClaimTemplates PVC 是 k8s 動態建立、不在 manifest 內，不隨 delete 移除；
-      腳本會列出這些 PVC 並提示手動清除的 kubectl delete 指令。
-      podman 軌 podman kube down --force，pod 與 named volume 一併移除。
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: '用法：task delete SVC=grafana TRACK=podman（未提供 SVC）'
-      - sh: "[ -n '{{.TRACK}}' ]"
-        msg: '用法：task delete SVC=grafana TRACK=podman（未提供 TRACK）'
-    cmds:
-      - bash bin/svc.sh '{{.SVC}}' delete '{{.TRACK}}'
-
-  seed:
-    # 確認由腳本負責：services/gmm/sync.py
-    desc: "[維運]【破壞性】把帳號、設定寫進執行中的服務，gmm 會刪多餘的帳號（用法：task seed SVC=gmm）"
-    summary: |
-      轉派至 services/<svc>/sync.sh，各服務實作不同，皆為冪等的營運工具。
-      gmm 的 sync.sh 再轉派給 sync.py，透過 guacamole REST API 建連線，每個 API 回應都檢查。
-      TRACK 以環境變數傳給 sync.sh，不讀軌名的服務忽略它。
-      唯讀檢查改用 task check:seed。
-      注意 gmm 的 seed 具破壞性：會刪除 mapping.env 以外多餘的 user／group／connection（僅保留 admin 帳號與 ROOT 群組）。
-      gmm 先印同步計畫，動資料前要求輸入服務名確認；無 tty 時中止、什麼都不刪。其餘服務不刪資料，不問確認。
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: '用法：task seed SVC=gmm（未提供 SVC）'
-      - sh: "[ -z '{{.CLI_ARGS}}' ]"
-        msg: "seed 不收 -- 之後的參數；唯讀檢查改用 task check:seed SVC=<svc>"
-    cmds:
-      - TRACK='{{.TRACK | default ""}}' bash services/{{.SVC}}/sync.sh
-
-  check:seed:
-    desc: "[維運] 唯讀檢查 seed 的結果（用法：task check:seed SVC=gmm）"
-    summary: |
-      轉派至 services/<svc>/sync.sh test，只做唯讀檢查、不寫入變更。
-      gmm 驗證帳號 token，以及 mapping.env 存在且每行欄數正確。
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: "用法：task check:seed SVC=gmm（未提供 SVC）"
-    cmds:
-      - TRACK='{{.TRACK | default ""}}' bash services/{{.SVC}}/sync.sh test
