@@ -1,4 +1,4 @@
 # ncb（nginx + certbot TLS 反代前門）工作負載正本。
-# 只有 podman 軌，沒有對齊對象，故 kind 維持 Pod、hostPort 直接寫在 manifest 內。
+# 只有 podman 軌，沒有對齊對象，故 kind 維持 Pod、主機埠寫在 podman/setting.conf。
 resources:
   - pod.yaml

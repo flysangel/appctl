@@ -1,6 +1,5 @@
-# minio（S3 物件儲存）k8s 軌工作負載正本。
-# 本服務兩軌拓樸不同且無法共用：podman kube play 不支援 StatefulSet
-# （實測 exit 125），故 podman 軌保留自己的 pod.yaml，不引用本目錄。
+# minio（S3 物件儲存）工作負載正本，兩軌共用。k8s 軌是分散式；podman 軌的 overlay
+# 用 patch 改成單節點（replicas 1、單一 minio-data 卷），由 appctl 翻成 Quadlet。
 # image 以 digest 釘選，不另帶 tag：兩者同時寫時 tag 淪為假資訊。digest 格式由 bin/check-manifests.py 擋。
 resources:
   - statefulset.yaml

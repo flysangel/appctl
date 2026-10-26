@@ -506,3 +506,60 @@ func TestRejectsNilSetting(t *testing.T) {
 		t.Fatal("空的 [ports] 應該回錯")
 	}
 }
+
+func TestTranslateAllServices(t *testing.T) {
+	root, err := repo.Root(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svcs, err := repo.Services(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, svc := range svcs {
+		if _, err := os.Stat(filepath.Join(root, "services", svc, "podman")); err != nil {
+			continue
+		}
+		n++
+		t.Run(svc, func(t *testing.T) {
+			out, err := render.Render(root, svc, "podman")
+			if err != nil {
+				t.Fatal(err)
+			}
+			d, err := render.Docs(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s, err := setting.Load(root, svc, "podman")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := setting.Validate(s, d); err != nil {
+				t.Fatal(err)
+			}
+			b, err := quadlet.Translate(svc, d, s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if svc != "minio" {
+				return
+			}
+			if strings.Join(b.Volumes, ",") != "minio-data" {
+				t.Fatalf("Volumes = %v", b.Volumes)
+			}
+			var all strings.Builder
+			for _, f := range b.Units {
+				all.Write(f.Content)
+			}
+			for _, want := range []string{"VolumeName=minio-data", "Exec=server /data"} {
+				if !strings.Contains(all.String(), want) {
+					t.Errorf("單元缺 %q：\n%s", want, all.String())
+				}
+			}
+		})
+	}
+	if n < 9 {
+		t.Fatalf("只找到 %d 個有 podman 軌的服務", n)
+	}
+}
