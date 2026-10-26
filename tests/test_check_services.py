@@ -106,35 +106,34 @@ def run(build, groups=None):
         if groups is not None:
             write(os.path.join(tmp, "config", "port-groups.conf"), groups)
         r = subprocess.run([sys.executable, SCRIPT, tmp], capture_output=True, text=True)
-        leaked = os.path.exists(os.path.join(tmp, "services", "a", "secret", "secret.env"))
-        return r, leaked
+        return r
 
 
 def test_conflict_not_in_group_fails():
-    r, _ = run(lambda t: (service(t, "a", podman={"podman": 8080}), service(t, "b", podman={"podman": 8080})), groups="")
+    r = run(lambda t: (service(t, "a", podman={"podman": 8080}), service(t, "b", podman={"podman": 8080})), groups="")
     assert r.returncode == 1, r.stdout + r.stderr
     assert "a" in r.stderr and "b" in r.stderr and "8080" in r.stderr, r.stderr
 
 
 def test_conflict_in_group_passes():
-    r, _ = run(lambda t: (service(t, "a", podman={"podman": 8080}), service(t, "b", podman={"podman": 8080})),
+    r = run(lambda t: (service(t, "a", podman={"podman": 8080}), service(t, "b", podman={"podman": 8080})),
                groups="# 互斥\na b\n")
     assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_different_hosts_do_not_conflict():
-    r, _ = run(lambda t: (service(t, "a", podman={"podman": 8080}), service(t, "b", podman={"podman-h1": 8080})))
+    r = run(lambda t: (service(t, "a", podman={"podman": 8080}), service(t, "b", podman={"podman-h1": 8080})))
     assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_namespace_must_be_default():
-    r, _ = run(lambda t: service(t, "a", k8s=True, ns="x"))
+    r = run(lambda t: service(t, "a", k8s=True, ns="x"))
     assert r.returncode == 1, r.stdout + r.stderr
     assert "namespace" in r.stderr, r.stderr
 
 
 def test_cluster_admin_lb_without_source_ranges_warns():
-    r, _ = run(lambda t: service(t, "a", k8s=True, cluster_admin=True))
+    r = run(lambda t: service(t, "a", k8s=True, cluster_admin=True))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Info:" in r.stdout and "loadBalancerSourceRanges" in r.stdout, r.stdout
 
@@ -144,14 +143,14 @@ def test_render_failure_reports_and_continues():
         service(t, "a", podman={"podman": 9000}, broken=True)
         service(t, "b", podman={"podman": 8080})
         service(t, "c", podman={"podman": 8080})
-    r, _ = run(build, groups="")
+    r = run(build, groups="")
     assert r.returncode == 1, r.stdout + r.stderr
     assert "a/podman" in r.stderr, r.stderr
     assert "8080" in r.stderr, r.stderr
 
 
 def test_secret_service_renders_with_tracked_secret():
-    r, leaked = run(lambda t: service(t, "a", podman={"podman": 8080}, k8s=True, secret=True))
+    r = run(lambda t: service(t, "a", podman={"podman": 8080}, k8s=True, secret=True))
     assert r.returncode == 0, r.stdout + r.stderr
 
 
