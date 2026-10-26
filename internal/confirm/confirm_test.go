@@ -71,3 +71,14 @@ func TestConfirmRequiresTTY(t *testing.T) {
 		t.Errorf("不是終端機時不應印提示：%q", out.String())
 	}
 }
+
+func TestPromptUsesGivenTextAndAnswer(t *testing.T) {
+	fakeTTY(t)
+	var out bytes.Buffer
+	if err := Prompt(stdinFile(t, "gmm\n"), &out, "刪除多餘的項目。輸入服務名確認：", "gmm"); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "刪除多餘的項目。輸入服務名確認：" {
+		t.Errorf("應只印呼叫端給的提示：%q", out.String())
+	}
+}

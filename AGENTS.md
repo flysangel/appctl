@@ -28,7 +28,7 @@
 ### 會刪資料的動作，先問使用者
 
 - `task delete`：k8s 軌連 manifest 內宣告的 PVC 一起刪，叢集 StorageClass 的 `reclaimPolicy` 是 `Delete`，資料跟著消失；podman 軌連具名卷一起移除。
-- `task seed SVC=gmm`：刪除 `mapping.env` 以外多餘的 user、group、connection。腳本動資料前要求輸入服務名，沒有 tty 時中止。腳本先印計畫再確認；`mapping.env` 有任一行欄數不對或一筆都沒有時，整批中止。
+- `appctl gmm seed`：刪除 `mapping.env` 以外多餘的 user、group、connection。腳本動資料前要求輸入服務名，沒有 tty 時中止。腳本先印計畫再確認；`mapping.env` 有任一行欄數不對或一筆都沒有時，整批中止。
 - `task delete SVC=ncb TRACK=podman`：連 `ncb-certbot` 卷刪掉，憑證一起消失。Let's Encrypt 的 rate limits 文件寫同一組網域每 7 天只簽 5 張重複憑證，刪了再簽會撞上限。
 - `kadm`、`xadm-lxqt`、`xadm-xfce` 是叢集最高權服務，帳密不能輪換。要部署前，先確認網段隔離。
 
@@ -59,7 +59,7 @@
 - bash：不要把 `[[ cond ]] && { ...; }` 當獨立語句。條件為假時整段回非零，日後加上 `errexit` 會靜默中止；當腳本最後一條語句時，整支腳本會以 1 結束。用 `if` 寫。既有的違規列在 `docs/PROGRESS.md`，不要順手改。
 - 不在 bash 裡解析 YAML，要解析就用 python。
 - `yq` 是 python-yq，只用 jq 相容語法，不用 `yq e`、`yq ea`、`yq eval`。
-- 語言只用 bash 與 python。bash 管流程、IO、git 膠水；python 管結構化資料驗證，營運工具要打 HTTP API 時也用 python（例如 `services/gmm/sync.py`）。
+- 語言只用 bash 與 python。bash 管流程、IO、git 膠水；python 管結構化資料驗證。
 
 ## 3. 地雷
 
@@ -120,7 +120,7 @@ podman 軌的煙測是 `sudo bin/appctl smoke <svc>...`，步驟與各服務的�
 
 | 不要 | 為什麼 |
 |---|---|
-| 沒問使用者就跑 `task delete`、`task seed SVC=gmm`，或刪 PVC | 會刪資料，不能復原 |
+| 沒問使用者就跑 `task delete`、`appctl gmm seed`，或刪 PVC | 會刪資料，不能復原 |
 | 被歷史 commit 擋 push 時，自己 squash 或改寫歷史 | 選哪條路是使用者的決定，先停下來問。HEAD 的內容也要修乾淨，squash 帶走的是 HEAD |
 | 順手改 `docs/PROGRESS.md` 列的既有違規 | 不在這次的範圍內，會讓 diff 混進無關改動 |
 | 繞過 `bin/svc.sh`，直接用 `podman kube down --force` 拆服務 | podman 4.9.3 只刪 `kind: Pod` 與 PVC 文件的卷，Deployment 與 DaemonSet 的卷會留著，下次 `apply` 接回舊資料。`svc.sh` 會補 PVC 殼並確認卷已刪 |

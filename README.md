@@ -44,7 +44,6 @@
 | `podman` 與 `sudo` | podman 軌部署。podman 軌是 rootful，查狀態與 log 也要 `sudo`；沒有 tty 時先 `sudo -v` | 走 podman 軌時 |
 | `python3` 與 PyYAML | 單元測試、`manifest-diff`、`task lint` 的四大文件與 Taskfile 檢查 | 必要 |
 | `skopeo` | `task check:image` 查映像是否還在來源 registry | 用到時 |
-| `nmap` | gmm 的 `task seed` | 用到時 |
 | `shellcheck` | `task lint` 的靜態檢查 | 必要 |
 | `gitleaks` | push 護欄的機密掃描 | 必要 |
 
@@ -104,25 +103,25 @@ podman 軌的 hostPort 綁主機的所有介面，同網段的其他主機都連
 
 `task dev` 列出開發用的 task，`task ops` 列出維運用的 task，`task --list-all` 列出全部 task。改完要跑哪些檢查，見 [AGENTS.md](AGENTS.md)〈完成定義〉。
 
-### 營運同步（`task seed`）
+### 營運同步（`appctl gmm seed`）
 
-部署前後的銜接動作。只有帶 `sync.sh` 的服務才有，各自實作不同（哪些服務有：`ls services/*/sync.sh`）：
+部署前後的銜接動作。gmm 用 `appctl gmm` 子命令，一般使用者身分就能跑：
 
 ```bash
 # gmm：佈建 guacamole 連線
-# services/gmm/sync.conf 已進版控，放連線目標與非機密參數。跑 k8s 軌時，改它的 GUACAMOLE_SERVER
+# services/gmm/sync.conf 已進版控，放 podman 軌的連線目標與非機密參數。k8s 軌自動 port-forward svc/gmm，不讀 GUACAMOLE_SERVER
 cp services/gmm/sync.secret.env.example services/gmm/sync.secret.env     # guacadmin 密碼
 cp services/gmm/mapping.env.example services/gmm/mapping.env             # 連線清單（pipe 分隔，欄位照 mapping.env.example）
-task seed SVC=gmm                                                        # 唯讀檢查用 task check:seed，驗 token 與 mapping.env 的欄數，不寫入
+bin/appctl gmm seed --track podman                                       # 唯讀檢查用 bin/appctl gmm check --track podman，驗 token 與 mapping.env 的欄數，不寫入
 ```
 
-**`task seed SVC=gmm` 有破壞性**：它會刪除 `mapping.env` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。動資料前，腳本先印出同步計畫（要建、要覆寫、要刪的名稱），再要求輸入服務名 `gmm`。沒有 tty 時，腳本中止，什麼都不刪。它的行為：
+**`appctl gmm seed` 有破壞性**：它會刪除 `mapping.env` 以外多餘的 user、group、connection，只保留 admin 帳號與 ROOT 群組。動資料前，腳本先印出同步計畫（要建、要覆寫、要刪的名稱），再要求輸入服務名 `gmm`。沒有 tty 時，腳本中止，什麼都不刪。它的行為：
 
-- `GUACAMOLE_SERVER` 要含 webapp 路徑 `/guacamole`。k8s 軌先 `kubectl port-forward svc/gmm 8080`，再把 URL 填進 `sync.conf`。
+- `GUACAMOLE_SERVER` 要含 webapp 路徑 `/guacamole`。`--track k8s` 時，appctl 自己跑 `kubectl port-forward svc/gmm`，用完就停。
 - guacadmin 的初始密碼由 mariadb 映像內建的 schema 決定。第一次登入後在 UI 改掉，`sync.secret.env` 要跟著改，否則取 token 失敗。
-- userpass 欄留空且帳號不存在時，產生 12 位密碼，只寫進 `services/gmm/random.csv`（0600），終端不印。這是唯一留存處。
+- userpass 欄留空且帳號不存在時，產生 `PASS_LENGTH` 位密碼，只寫進 `services/gmm/random.csv`（0600），終端不印。這是唯一留存處。
 - 連線名稱由 domain、acct、ip、alias 組成，不是欄位。改任一欄等於換名字：下次 seed 建新連線、刪舊連線。
-- 每行先用 nmap 探目標埠，沒回 open 就在名稱加 `.X`。目標關機再開機，兩次 seed 會各刪建一次。
+- 每行先對目標埠開 TCP 連線（3 秒逾時），連不上就在名稱加 `.X`。目標關機再開機，兩次 seed 會各刪建一次。
 - 已存在的 user 不更新密碼，sharing profile 不更新，permission 只加不減；connection 已存在就整份 PUT。要移除資源只有一條路：刪 mapping 行再跑 seed。
 - 每個 user 對 group 與 connection 只拿 READ；每條 connection 固定建 `ro`、`rw` 兩個 sharing profile。
 - `mapping.env` 有任一行欄數不對，或一筆連線都沒有，就整批中止，什麼都不改。

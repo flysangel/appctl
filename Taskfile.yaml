@@ -30,7 +30,7 @@ tasks:
       - python3 bin/check-docs.py
       - python3 bin/check-taskfile.py
       - go run ./cmd/appctl check
-      - shellcheck -S error -x bin/svc.sh bin/doctor.sh bin/render-diff.sh services/gmm/sync.sh
+      - shellcheck -S error -x bin/svc.sh bin/doctor.sh bin/render-diff.sh
       - shellcheck -S warning .githooks/pre-push
 
   bootstrap:
@@ -73,32 +73,3 @@ tasks:
         msg: '用法：task delete SVC=grafana TRACK=podman（未提供 TRACK）'
     cmds:
       - bash bin/svc.sh '{{.SVC}}' delete '{{.TRACK}}'
-
-  seed:
-    # 確認由腳本負責：services/gmm/sync.py
-    desc: "[維運]【破壞性】把帳號、設定寫進執行中的服務，gmm 會刪多餘的帳號（用法：task seed SVC=gmm）"
-    summary: |
-      轉派至 services/<svc>/sync.sh，各服務實作不同，皆為冪等的營運工具。
-      gmm 的 sync.sh 再轉派給 sync.py，透過 guacamole REST API 建連線，每個 API 回應都檢查。
-      TRACK 以環境變數傳給 sync.sh，不讀軌名的服務忽略它。
-      唯讀檢查改用 task check:seed。
-      注意 gmm 的 seed 具破壞性：會刪除 mapping.env 以外多餘的 user／group／connection（僅保留 admin 帳號與 ROOT 群組）。
-      gmm 先印同步計畫，動資料前要求輸入服務名確認；無 tty 時中止、什麼都不刪。其餘服務不刪資料，不問確認。
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: '用法：task seed SVC=gmm（未提供 SVC）'
-      - sh: "[ -z '{{.CLI_ARGS}}' ]"
-        msg: "seed 不收 -- 之後的參數；唯讀檢查改用 task check:seed SVC=<svc>"
-    cmds:
-      - TRACK='{{.TRACK | default ""}}' bash services/{{.SVC}}/sync.sh
-
-  check:seed:
-    desc: "[維運] 唯讀檢查 seed 的結果（用法：task check:seed SVC=gmm）"
-    summary: |
-      轉派至 services/<svc>/sync.sh test，只做唯讀檢查、不寫入變更。
-      gmm 驗證帳號 token，以及 mapping.env 存在且每行欄數正確。
-    preconditions:
-      - sh: "[ -n '{{.SVC}}' ]"
-        msg: "用法：task check:seed SVC=gmm（未提供 SVC）"
-    cmds:
-      - TRACK='{{.TRACK | default ""}}' bash services/{{.SVC}}/sync.sh test

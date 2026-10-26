@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/flysangel/appctl/internal/bundle"
 	"github.com/flysangel/appctl/internal/check"
+	"github.com/flysangel/appctl/internal/gmm"
 	"github.com/flysangel/appctl/internal/k8s"
 	"github.com/flysangel/appctl/internal/podman"
 	"github.com/flysangel/appctl/internal/render"
@@ -38,6 +40,8 @@ func main() {
 		err = runCheckImages(os.Args[2:])
 	case "check-secret":
 		err = runCheckSecret(os.Args[2:])
+	case "gmm":
+		err = runGmm(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -53,7 +57,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>")
+	fmt.Fprintln(os.Stderr, "用法：appctl render|apply|stop|delete <svc> --track <軌>\n      sudo appctl smoke [--allow-guarded] <svc>...\n      appctl check\n      appctl check-images <svc>\n      appctl check-secret <svc>\n      appctl gmm seed|check --track <軌>")
 }
 
 // parseSvcTrack 解析 <svc> --track <軌>，<svc> 在 flag 前後都可以。
@@ -293,4 +297,53 @@ func runCheckSecret(args []string) error {
 	}
 	fmt.Printf("Success: %s 的機密在各檔之間一致\n", svc)
 	return nil
+}
+
+// runGmm 處理 gmm seed 與 gmm check。k8s 軌先 port-forward svc/gmm，用完就停；
+// podman 軌讀 sync.conf 的 GUACAMOLE_SERVER。一般使用者身分就能跑。
+func runGmm(args []string) error {
+	const use = "用法：appctl gmm seed|check --track <軌>"
+	if len(args) == 0 || (args[0] != "seed" && args[0] != "check") {
+		return errors.New(use)
+	}
+	sub := args[0]
+	fs := flag.NewFlagSet("gmm "+sub, flag.ContinueOnError)
+	t := fs.String("track", "", "軌目錄名，例如 k8s 或 podman")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || *t == "" {
+		return errors.New(use)
+	}
+	track := *t
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	tracks, err := repo.Tracks(root, "gmm")
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(tracks, track) {
+		return fmt.Errorf("gmm 沒有 %s 軌（有：%s）", track, strings.Join(tracks, "、"))
+	}
+	ctx := context.Background()
+	opts := gmm.Options{Root: root, Stdin: os.Stdin, Out: os.Stdout, Err: os.Stderr}
+	switch {
+	case track == "k8s":
+		port, stop, err := k8s.PortForward(ctx, run.Exec{}, "svc/gmm", 8080)
+		if err != nil {
+			return err
+		}
+		defer stop()
+		opts.Server = fmt.Sprintf("http://127.0.0.1:%d/guacamole", port)
+		fmt.Printf("Info: 已用 kubectl port-forward 連到 svc/gmm，本機埠 %d\n", port)
+	case strings.HasPrefix(track, "podman"):
+	default:
+		return fmt.Errorf("%s 軌的 gmm %s 還沒實作", track, sub)
+	}
+	if sub == "seed" {
+		return gmm.Seed(ctx, opts)
+	}
+	return gmm.Check(ctx, opts)
 }

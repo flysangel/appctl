@@ -2,7 +2,9 @@ package run
 
 import (
 	"context"
+	"io"
 	"strings"
+	"sync"
 )
 
 // Call 是 Fake 記下的一次呼叫。
@@ -86,4 +88,53 @@ func (f *Fake) Called(prefix string) bool {
 		}
 	}
 	return false
+}
+
+// FakeStarter 是測試用的 Starter：記下每次啟動，每個 Process 的 stdout 是 Out，Wait 回 Exit。
+// StartErr 非 nil 時，Start 直接回這個錯誤。
+type FakeStarter struct {
+	Calls    []Call
+	Procs    []*FakeProcess
+	Out      string
+	Exit     error
+	StartErr error
+}
+
+// Start 實作 Starter。
+func (f *FakeStarter) Start(_ context.Context, name string, args []string) (Process, error) {
+	f.Calls = append(f.Calls, Call{Name: name, Args: append([]string(nil), args...)})
+	if f.StartErr != nil {
+		return nil, f.StartErr
+	}
+	p := &FakeProcess{out: strings.NewReader(f.Out), exit: f.Exit}
+	f.Procs = append(f.Procs, p)
+	return p, nil
+}
+
+// FakeProcess 是 FakeStarter 啟動的 Process。
+type FakeProcess struct {
+	mu      sync.Mutex
+	out     io.Reader
+	exit    error
+	stopped bool
+}
+
+// Stdout 實作 Process。
+func (p *FakeProcess) Stdout() io.Reader { return p.out }
+
+// Wait 實作 Process。
+func (p *FakeProcess) Wait() error { return p.exit }
+
+// Stop 實作 Process。
+func (p *FakeProcess) Stop() {
+	p.mu.Lock()
+	p.stopped = true
+	p.mu.Unlock()
+}
+
+// Stopped 回傳 Stop 有沒有被呼叫過。
+func (p *FakeProcess) Stopped() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stopped
 }

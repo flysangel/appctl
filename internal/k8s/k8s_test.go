@@ -138,3 +138,43 @@ func TestStopRejectedOnK8s(t *testing.T) {
 		t.Fatalf("應回錯並指向 kubectl scale：%v", err)
 	}
 }
+
+func TestPortForwardParsesLocalPort(t *testing.T) {
+	s := &run.FakeStarter{Out: "Forwarding from 127.0.0.1:43567 -> 8080\nForwarding from [::1]:43567 -> 8080\n"}
+	port, stop, err := PortForward(context.Background(), s, "svc/gmm", 8080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port != 43567 {
+		t.Errorf("本機埠應是 43567，得到 %d", port)
+	}
+	if len(s.Calls) != 1 || s.Calls[0].Line() != "kubectl port-forward -n default svc/gmm :8080" {
+		t.Fatalf("應只跑 kubectl port-forward -n default svc/gmm :8080：%v", s.Calls)
+	}
+	if s.Procs[0].Stopped() {
+		t.Fatal("呼叫 stop 之前，port-forward 不該停")
+	}
+	stop()
+	stop()
+	if !s.Procs[0].Stopped() {
+		t.Error("呼叫 stop 之後，port-forward 應該停")
+	}
+}
+
+func TestPortForwardFailsWithoutPort(t *testing.T) {
+	s := &run.FakeStarter{Exit: &run.ExitError{Cmd: "kubectl port-forward", Code: 1, Stderr: `services "gmm" not found`}}
+	_, _, err := PortForward(context.Background(), s, "svc/gmm", 8080)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("kubectl 沒回報本機埠就結束時，應回錯並帶 stderr：%v", err)
+	}
+	if !s.Procs[0].Stopped() {
+		t.Error("失敗時也要停掉 port-forward")
+	}
+}
+
+func TestPortForwardStartError(t *testing.T) {
+	s := &run.FakeStarter{StartErr: errors.New("kubectl：executable file not found")}
+	if _, _, err := PortForward(context.Background(), s, "svc/gmm", 8080); err == nil {
+		t.Fatal("kubectl 起不來時應回錯")
+	}
+}

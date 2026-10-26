@@ -3,11 +3,15 @@
 package k8s
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flysangel/appctl/internal/confirm"
 	"github.com/flysangel/appctl/internal/run"
@@ -80,4 +84,55 @@ func Delete(ctx context.Context, env Env, svc string, manifest []byte) error {
 // Stop 一律回錯：k8s 軌沒有 stop 動詞，暫停要用原生的 kubectl scale。
 func Stop(svc string) error {
 	return fmt.Errorf("k8s 軌沒有 stop。要暫停 %s 但保留資料，改用 kubectl scale -n default --replicas=0 deployment/<name>（minio 是 statefulset/minio；DaemonSet 沒有 replicas，只能 delete）", svc)
+}
+
+// portForwardTimeout 是等 kubectl port-forward 回報本機埠的上限。
+var portForwardTimeout = 30 * time.Second
+
+var forwardingRE = regexp.MustCompile(`^Forwarding from 127\.0\.0\.1:(\d+) -> `)
+
+// PortForward 在背景跑 kubectl port-forward -n default <target> :<remotePort>，
+// 從輸出的「Forwarding from 127.0.0.1:<埠> -> ...」讀出 kubectl 選的本機埠。
+// 成功時呼叫端用完要呼叫 stop；失敗時這裡已經停掉 kubectl。stop 可以重複呼叫。
+func PortForward(ctx context.Context, s run.Starter, target string, remotePort int) (localPort int, stop func(), err error) {
+	args := []string{"port-forward", "-n", "default", target, fmt.Sprintf(":%d", remotePort)}
+	p, err := s.Start(ctx, "kubectl", args)
+	if err != nil {
+		return 0, nil, fmt.Errorf("kubectl port-forward 起不來：%w", err)
+	}
+	ports := make(chan int, 1)
+	go func() {
+		// 讀到埠之後繼續讀到 EOF：kubectl 每接一條連線就印一行，不讀會塞住它
+		sc := bufio.NewScanner(p.Stdout())
+		found := false
+		for sc.Scan() {
+			if m := forwardingRE.FindStringSubmatch(sc.Text()); !found && m != nil {
+				if n, err := strconv.Atoi(m[1]); err == nil {
+					ports <- n
+					found = true
+				}
+			}
+		}
+		close(ports)
+	}()
+	timer := time.NewTimer(portForwardTimeout)
+	defer timer.Stop()
+	select {
+	case n, ok := <-ports:
+		if ok {
+			return n, p.Stop, nil
+		}
+		werr := p.Wait()
+		p.Stop()
+		if werr == nil {
+			werr = fmt.Errorf("輸出裡沒有本機埠")
+		}
+		return 0, nil, fmt.Errorf("kubectl port-forward %s 沒有回報本機埠：%w", target, werr)
+	case <-timer.C:
+		p.Stop()
+		return 0, nil, fmt.Errorf("kubectl port-forward %s 在 %s 內沒有回報本機埠", target, portForwardTimeout)
+	case <-ctx.Done():
+		p.Stop()
+		return 0, nil, ctx.Err()
+	}
 }
